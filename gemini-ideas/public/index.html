@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Renovator - Ideas (test UI)</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>AI Renovator</h1>
+      <span class="badge">temporary test UI - Gemini ideas</span>
+    </header>
+
+    <main>
+      <p class="lede">
+        Describe the space and what you want to change. This branch returns the
+        <strong>tools &amp; resources</strong> you need and the <strong>possible steps</strong>.
+      </p>
+
+      <form id="renovation-form" class="card">
+        <label for="description">What do you want to renovate?</label>
+        <textarea
+          id="description"
+          name="description"
+          rows="5"
+          required
+          minlength="10"
+          maxlength="2000"
+          placeholder="e.g. Small 1990s bathroom, 4 m². Rip out the old tiles and vanity, keep the tub, replace with a walk-in shower and new floor tiles."
+        ></textarea>
+
+        <div class="row">
+          <div class="field">
+            <label for="roomType">Room</label>
+            <select id="roomType" name="roomType">
+              <option value="">Not sure / other</option>
+              <option>Kitchen</option>
+              <option>Bathroom</option>
+              <option>Bedroom</option>
+              <option>Living room</option>
+              <option>Entryway</option>
+              <option>Balcony or terrace</option>
+              <option>Whole apartment</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="constraints">Constraints <span class="hint">(optional)</span></label>
+            <input
+              id="constraints"
+              name="constraints"
+              type="text"
+              maxlength="500"
+              placeholder="e.g. renting, must finish in one weekend, no experience"
+            />
+          </div>
+        </div>
+
+        <button type="submit" id="submit-button">Generate tools &amp; steps</button>
+        <p class="hint">Every generation is a fresh idea, so you can re-run it until the plan fits.</p>
+      </form>
+
+      <p id="status" class="status" role="status" hidden></p>
+
+      <section id="results" hidden>
+        <p id="summary" class="summary"></p>
+
+        <div class="grid">
+          <article class="card">
+            <h2>Tools &amp; resources</h2>
+            <ul id="tools" class="tools"></ul>
+          </article>
+
+          <article class="card">
+            <h2>Possible steps</h2>
+            <ol id="steps" class="steps"></ol>
+          </article>
+        </div>
+
+        <article class="card" id="tips-card" hidden>
+          <h2>Watch out for</h2>
+          <ul id="tips"></ul>
+        </article>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
