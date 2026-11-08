@@ -33,6 +33,7 @@ Your job is limited to three things:
 3. Where to buy those tools and materials near the user's location.
 
 Rules:
+- Start with a short title (at most 6 words) naming the job, e.g. "Painted Kitchen Refresh". No trailing period, no marketing language.
 - Base your answer on the user's description; do not invent a different room or a different scope.
 - Keep scope realistic for a hands-on renovation, not a full rebuild.
 - List only tools/resources that the described work actually needs. Group reusable things (e.g. "cordless drill") and consumables (e.g. "painter's tape") separately via the category field.
@@ -50,6 +51,10 @@ Rules:
 const RESPONSE_SCHEMA = {
   type: 'object',
   properties: {
+    title: {
+      type: 'string',
+      description: 'Short label for the whole job: at most 6 words, no trailing period.',
+    },
     summary: {
       type: 'string',
       description: 'One or two sentences on what the renovation involves and its main risk.',
@@ -137,7 +142,7 @@ const RESPONSE_SCHEMA = {
       description: 'Up to three short practical warnings specific to this job.',
     },
   },
-  required: ['summary', 'budget', 'toolsAndResources', 'stores', 'steps'],
+  required: ['title', 'summary', 'budget', 'toolsAndResources', 'stores', 'steps'],
 };
 
 // The REST responseSchema uses OpenAPI-style uppercase type names.
@@ -214,6 +219,7 @@ function parseJson(raw, model) {
 }
 
 function normalizeIdeas(raw, model) {
+  const title = typeof raw.title === 'string' ? raw.title.trim() : '';
   const summary = typeof raw.summary === 'string' ? raw.summary.trim() : '';
 
   const toolsAndResources = Array.isArray(raw.toolsAndResources)
@@ -267,7 +273,7 @@ function normalizeIdeas(raw, model) {
     ? raw.tips.filter((tip) => typeof tip === 'string' && tip.trim()).map((tip) => tip.trim())
     : [];
 
-  return { summary, budget, toolsAndResources, stores, steps, tips, model };
+  return { title, summary, budget, toolsAndResources, stores, steps, tips, model };
 }
 
 function errorDetail(data) {

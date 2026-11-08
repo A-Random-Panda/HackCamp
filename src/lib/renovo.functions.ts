@@ -28,6 +28,7 @@ type IdeaStore = { name?: string; type?: string; bestFor?: string };
 type IdeaStep = { title?: string; detail?: string; estimatedTime?: string } | string;
 
 export type IdeasResponse = {
+  title?: string;
   summary?: string;
   budget?: string;
   toolsAndResources?: IdeaTool[];
@@ -125,10 +126,19 @@ function currencyFromBudget(budget: string): string {
   return "USD";
 }
 
-function titleFrom(summary: string, fallback: string): string {
-  const sentence = summary.split(/[.!?]\s/)[0]?.trim() ?? "";
-  const title = sentence.length >= 8 ? sentence : fallback.trim();
-  return (title || "Renovation plan").slice(0, 80);
+const TITLE_WORDS = 6;
+const TITLE_CHARS = 48;
+
+/** Keep titles to a few words, cut on a word boundary, without a trailing period. */
+function shortenTitle(text: string): string {
+  const firstClause = text.split(/[.,;:!?]\s/)[0]?.trim() || text.trim();
+  const words = firstClause.split(/\s+/).slice(0, TITLE_WORDS).join(" ");
+  const clipped = words.length > TITLE_CHARS ? words.slice(0, TITLE_CHARS).replace(/\s+\S*$/, "").trim() : words;
+  return clipped.replace(/[.,;:!?]+$/, "").trim();
+}
+
+function titleFrom(ideas: IdeasResponse, renovation: string): string {
+  return shortenTitle(ideas.title ?? "") || shortenTitle(renovation) || "Renovation plan";
 }
 
 export function buildPlan(data: PlanInput, ideas: IdeasResponse): RenovationPlan {
@@ -196,7 +206,7 @@ export function buildPlan(data: PlanInput, ideas: IdeasResponse): RenovationPlan
     .slice(0, 4000);
 
   return {
-    title: titleFrom(ideas.summary ?? "", data.renovation),
+    title: titleFrom(ideas, data.renovation),
     summary,
     currency: currencyFromBudget(budget),
     totalCost,

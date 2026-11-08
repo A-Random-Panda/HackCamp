@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-labelledby="renovo-logo-title">
+  <title id="renovo-logo-title">Renovo</title>
+  <circle cx="50" cy="50" r="50" fill="#4a1d13"/>
+  <g fill="none" stroke="#ff7a18" stroke-width="6.2" stroke-linecap="butt" stroke-linejoin="miter">
+    <path d="M18.2 47.6 L49.3 9.4 L80.8 47.6"/>
+    <path d="M32.3 52.6 V69.8 H73.6 V52.6"/>
+  </g>
+  <path d="M65.8 12.4 H71.8 V36.7 L65.8 29.4 Z" fill="#ff7a18"/>
+</svg>

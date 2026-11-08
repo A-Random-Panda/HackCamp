@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Check, Hammer, ImagePlus, Loader2, MapPin, Plus, RefreshCw, Trash2, Wallet, X } from "lucide-react";
+import { ArrowUp, Check, Hammer, ImagePlus, Loader2, MapPin, Plus, RefreshCw, Sparkles, Trash2, Undo2, Wallet, X } from "lucide-react";
 import { createPlan, renderFinished } from "@/lib/renovo.functions";
 import type { Iteration, Project } from "@/lib/renovo-types";
 import { DiagramView } from "@/components/renovo/Diagram";
@@ -28,6 +28,9 @@ const EXAMPLES = [
   { label: "Cozy living room", renovation: "Add built-in shelving around the fireplace, warm wood flooring and a reading nook by the window.", location: "Manchester, UK", constraints: "Renting — landlord allows only reversible changes. Old Victorian walls.", budget: "£4,000", img: "https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=1024&q=70" },
 ];
 
+const STYLES = ["Modern", "Minimal", "Scandinavian", "Industrial", "Warm traditional"];
+const PALETTES = ["Light and airy", "Warm neutrals", "Bold contrast", "Dark and moody", "Natural green"];
+
 async function toDataUrl(src: Blob | string): Promise<string> {
   const blob = typeof src === "string" ? await (await fetch(src)).blob() : src;
   const bmp = await createImageBitmap(blob);
@@ -37,6 +40,14 @@ async function toDataUrl(src: Blob | string): Promise<string> {
   c.height = Math.round(bmp.height * s);
   c.getContext("2d")!.drawImage(bmp, 0, 0, c.width, c.height);
   return c.toDataURL("image/jpeg", 0.8);
+}
+
+/** Short label for a project, cut on a word boundary instead of mid-word. */
+function shortName(text: string): string {
+  const first = text.split(/[.,;:!?]/)[0]?.trim() || text.trim();
+  const words = first.split(/\s+/).slice(0, 7).join(" ");
+  const clipped = words.length > 44 ? words.slice(0, 44).replace(/\s+\S*$/, "").trim() : words;
+  return clipped.replace(/[.,;:!?]+$/, "").trim() || "New renovation";
 }
 
 function money(n: number, cur: string) {
@@ -79,7 +90,7 @@ function Index() {
       <FallingLogos />
       <aside className="z-10 sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar p-4 backdrop-blur-xl md:flex">
         <div className="mb-6 flex items-center gap-2 px-2">
-          <div className="grid h-8 w-8 place-items-center rounded-lg bg-brand glow"><Hammer className="h-4 w-4 text-primary-foreground" /></div>
+          <img src="/logo.svg" alt="Renovo logo" className="h-8 w-8 shrink-0 rounded-full" />
           <span className="font-display text-xl font-extrabold text-brand">Renovo</span>
         </div>
         <button onClick={() => setActiveId(null)} className="mb-4 flex items-center gap-2 rounded-xl border border-border px-3 py-2 text-sm transition hover:bg-accent">
@@ -139,7 +150,7 @@ function NewForm({ onCreated }: { onCreated: (p: Project) => void }) {
     setBusy(true);
     onCreated({
       id: crypto.randomUUID(),
-      name: renovation.slice(0, 40),
+      name: shortName(renovation),
       createdAt: Date.now(),
       image, renovation, location, constraints, budget,
       iterations: [],
@@ -205,32 +216,42 @@ function ProjectView({ project, onUpdate }: { project: Project; onUpdate: (fn: (
   const [feedback, setFeedback] = useState("");
   const [showChange, setShowChange] = useState(false);
   const [refine, setRefine] = useState("");
-  const [showRefine, setShowRefine] = useState(false);
+  const [style, setStyle] = useState<string | null>(null);
+  const [palette, setPalette] = useState<string | null>(null);
+  const [showBefore, setShowBefore] = useState(false);
   const started = useRef(false);
 
-  // No plan yet: the edited room is waiting for a yes/no from the user.
-  const awaitingApproval = project.iterations.length === 0;
+  // Nothing is priced until the user has seen and approved the edited room.
+  const priced = project.iterations.length > 0;
+
+  const tweakInstruction = () =>
+    [style ? `${style} interior style` : "", palette ? `${palette} colour palette` : "", refine.trim()]
+      .filter(Boolean)
+      .join("; ");
 
   const previewPrompt = (instruction?: string) =>
     [
       `Renovate this room: ${project.renovation}.`,
-      instruction?.trim() ? `Refine the previous result: ${instruction.trim()}.` : "",
+      instruction?.trim() ? `Apply these preferences: ${instruction.trim()}.` : "",
       "Keep the same camera angle, layout and room geometry; photorealistic interior.",
     ]
       .filter(Boolean)
       .join(" ")
       .slice(0, 4000);
 
-  // Step 1: show the edited room before spending anything on pricing.
-  const renderPreview = async (instruction?: string) => {
+  // Step 1: render the edited room only. No pricing, no plan yet.
+  const renderPreview = async (instruction?: string, fromOriginal = false) => {
     setError(null);
+    setShowBefore(false);
     setBusy("preview");
     try {
       const { image } = await renderFn({
-        data: { image: project.preview ?? project.image, prompt: previewPrompt(instruction) },
+        data: {
+          image: fromOriginal ? project.image : (project.preview ?? project.image),
+          prompt: previewPrompt(instruction),
+        },
       });
       onUpdate((p) => ({ ...p, preview: image }));
-      setShowRefine(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
     } finally {
@@ -291,7 +312,7 @@ function ProjectView({ project, onUpdate }: { project: Project; onUpdate: (fn: (
   useEffect(() => {
     if (!started.current && project.iterations.length === 0 && !project.preview) {
       started.current = true;
-      run();
+      renderPreview();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -302,7 +323,7 @@ function ProjectView({ project, onUpdate }: { project: Project; onUpdate: (fn: (
         <div className="flex flex-col gap-5 md:flex-row">
           <img src={project.image} alt="Original" className="h-40 w-full rounded-2xl object-cover md:w-56" />
           <div className="space-y-2 text-sm">
-            <h1 className="font-display text-3xl font-extrabold text-brand">{project.name}</h1>
+            <h1 className="break-words font-display text-3xl font-extrabold text-brand">{project.name}</h1>
             <p>{project.renovation}</p>
             <p className="text-muted-foreground"><MapPin className="mr-1 inline h-3.5 w-3.5" />{project.location}{project.budget && ` · Budget ${project.budget}`}</p>
             {project.constraints && <p className="text-muted-foreground">Constraints: {project.constraints}</p>}
@@ -310,53 +331,114 @@ function ProjectView({ project, onUpdate }: { project: Project; onUpdate: (fn: (
         </div>
       </header>
 
-      {awaitingApproval ? (
-        <section className="glass glow space-y-5 rounded-3xl p-6 fade-up">
+      <section className="glass glow space-y-5 rounded-3xl p-6 fade-up">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="font-display text-2xl font-bold text-brand">Your renovated space</h2>
             <p className="text-sm text-muted-foreground">
-              Check the preview first. Once you're happy with it, Renovo prices the materials, finds stores and writes the steps.
+              {priced
+                ? "The plan below is built on this image."
+                : "See the image first. Nothing is priced until you say it's right."}
             </p>
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <figure className="overflow-hidden rounded-2xl bg-muted">
-              <img src={project.image} alt="Before" className="aspect-square w-full object-cover" />
-              <figcaption className="px-4 py-2 text-xs text-muted-foreground">Your photo</figcaption>
-            </figure>
-            <figure className="overflow-hidden rounded-2xl bg-muted">
-              {project.preview ? (
-                <img src={project.preview} alt="After" className="aspect-square w-full object-cover" />
+          {priced && (
+            <span className="flex items-center gap-1 rounded-full bg-secondary px-3 py-1 text-xs text-brand"><Check className="h-3.5 w-3.5" /> Approved image</span>
+          )}
+        </div>
+
+        <figure className="relative overflow-hidden rounded-2xl bg-muted">
+          {project.preview ? (
+            <img
+              src={showBefore ? project.image : project.preview}
+              alt={showBefore ? "Before" : "Proposed renovation"}
+              className="max-h-[70vh] w-full object-contain"
+            />
+          ) : (
+            <div className="grid min-h-64 place-items-center gap-3 text-sm text-muted-foreground">
+              <Loader2 className="h-6 w-6 animate-spin text-brand" />
+              Rendering your renovated room…
+            </div>
+          )}
+          {project.preview && (
+            <div className="absolute left-3 top-3 flex gap-1 rounded-full bg-background/80 p-1 text-xs backdrop-blur">
+              <button onClick={() => setShowBefore(true)} className={`rounded-full px-3 py-1 transition ${showBefore ? "bg-brand text-primary-foreground" : "hover:bg-accent"}`}>Before</button>
+              <button onClick={() => setShowBefore(false)} className={`rounded-full px-3 py-1 transition ${!showBefore ? "bg-brand text-primary-foreground" : "hover:bg-accent"}`}>After</button>
+            </div>
+          )}
+          {busy === "preview" && project.preview && (
+            <div className="absolute inset-0 grid place-items-center bg-background/60"><Loader2 className="h-7 w-7 animate-spin text-brand" /></div>
+          )}
+        </figure>
+
+        {!priced && project.preview && !busy && (
+          <div className="space-y-4">
+            <div>
+              <p className="font-display text-lg font-bold text-brand">Not quite it? Tweak the image first.</p>
+              <p className="text-xs text-muted-foreground">Pick a direction or describe what you see in your head. Nothing is priced while you tweak.</p>
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-wider text-muted-foreground">Style</p>
+              <div className="flex flex-wrap gap-2">
+                {STYLES.map((s) => (
+                  <button key={s} onClick={() => setStyle(style === s ? null : s)} className={`rounded-full border px-3 py-1 text-xs transition ${style === s ? "border-brand bg-brand text-primary-foreground" : "border-border hover:border-brand hover:text-brand"}`}>{s}</button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-wider text-muted-foreground">Colour palette</p>
+              <div className="flex flex-wrap gap-2">
+                {PALETTES.map((p) => (
+                  <button key={p} onClick={() => setPalette(palette === p ? null : p)} className={`rounded-full border px-3 py-1 text-xs transition ${palette === p ? "border-brand bg-brand text-primary-foreground" : "border-border hover:border-brand hover:text-brand"}`}>{p}</button>
+                ))}
+              </div>
+            </div>
+            <textarea value={refine} onChange={(e) => setRefine(e.target.value)} rows={3} placeholder="Anything else? e.g. keep the cabinets, lighter oak floor, remove the rug, add open shelving" className="w-full resize-none rounded-xl bg-muted px-4 py-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+            <div className="flex flex-wrap gap-2">
+              <button disabled={!tweakInstruction()} onClick={() => renderPreview(tweakInstruction())} className="flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm text-primary-foreground disabled:opacity-40"><Sparkles className="h-4 w-4" /> Update preview</button>
+              <button onClick={() => { setStyle(null); setPalette(null); setRefine(""); renderPreview(undefined, true); }} className="flex items-center gap-2 rounded-full bg-secondary px-5 py-2 text-sm"><Undo2 className="h-4 w-4" /> Start from my photo</button>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+              <p className="font-display text-lg font-bold">Happy with this image?</p>
+              <button onClick={approvePreview} className="flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm text-primary-foreground"><Check className="h-4 w-4" /> Yes, price this</button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {priced && (
+        <>
+          {project.iterations.map((it, i) => (
+            <IterationView key={i} it={it} index={i} total={project.iterations.length} original={project.image} hideCompare={i === 0} />
+          ))}
+
+          {!busy && (
+            <section className="glass glow rounded-3xl p-6">
+              {project.accepted ? (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="flex items-center gap-2 font-display text-lg font-bold text-brand"><Check className="h-5 w-5" /> You're going with this plan.</p>
+                  <button onClick={() => { onUpdate((p) => ({ ...p, accepted: false })); setShowChange(true); }} className="rounded-full border border-border px-4 py-2 text-sm hover:bg-accent">Change it anyway</button>
+                </div>
+              ) : showChange ? (
+                <div className="space-y-3">
+                  <p className="font-display text-lg font-bold text-brand">What should change?</p>
+                  <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)} rows={3} placeholder="e.g. Keep it under $10k, use darker cabinets and open shelving instead of uppers" className="w-full resize-none rounded-xl bg-muted px-4 py-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                  <div className="flex gap-2">
+                    <button disabled={!feedback.trim()} onClick={() => { const f = feedback; setFeedback(""); setShowChange(false); run(f); }} className="flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm text-primary-foreground disabled:opacity-40"><RefreshCw className="h-4 w-4" /> Generate new version</button>
+                    <button onClick={() => setShowChange(false)} className="rounded-full px-4 py-2 text-sm hover:bg-accent">Cancel</button>
+                  </div>
+                </div>
               ) : (
-                <div className="grid aspect-square place-items-center text-sm text-muted-foreground">
-                  <Loader2 className="h-6 w-6 animate-spin text-brand" />
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="font-display text-lg font-bold">Happy with the plan?</p>
+                  <div className="flex gap-2">
+                    <button onClick={() => onUpdate((p) => ({ ...p, accepted: true }))} className="flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm text-primary-foreground"><Check className="h-4 w-4" /> Go with this</button>
+                    <button onClick={() => setShowChange(true)} className="flex items-center gap-2 rounded-full bg-secondary px-5 py-2 text-sm"><RefreshCw className="h-4 w-4" /> Change it</button>
+                  </div>
                 </div>
               )}
-              <figcaption className="px-4 py-2 text-xs text-muted-foreground">Proposed renovation</figcaption>
-            </figure>
-          </div>
-          {project.preview && !busy && (showRefine ? (
-            <div className="space-y-3">
-              <p className="font-display text-lg font-bold text-brand">What should change in the image?</p>
-              <textarea value={refine} onChange={(e) => setRefine(e.target.value)} rows={3} placeholder="e.g. keep the cabinets, but swap the floor for lighter oak and drop the rug" className="w-full resize-none rounded-xl bg-muted px-4 py-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
-              <div className="flex gap-2">
-                <button disabled={!refine.trim()} onClick={() => { const f = refine; setRefine(""); renderPreview(f); }} className="flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm text-primary-foreground disabled:opacity-40"><RefreshCw className="h-4 w-4" /> Update preview</button>
-                <button onClick={() => setShowRefine(false)} className="rounded-full px-4 py-2 text-sm hover:bg-accent">Cancel</button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="font-display text-lg font-bold">Happy with this preview?</p>
-              <div className="flex flex-wrap gap-2">
-                <button onClick={approvePreview} className="flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm text-primary-foreground"><Check className="h-4 w-4" /> Yes, price this</button>
-                <button onClick={() => setShowRefine(true)} className="flex items-center gap-2 rounded-full bg-secondary px-5 py-2 text-sm"><RefreshCw className="h-4 w-4" /> Refine the image</button>
-              </div>
-            </div>
-          ))}
-        </section>
-      ) : (
-        project.iterations.map((it, i) => (
-          <IterationView key={i} it={it} index={i} total={project.iterations.length} original={project.image} />
-        ))
+            </section>
+          )}
+        </>
       )}
 
       {busy && (
@@ -368,36 +450,8 @@ function ProjectView({ project, onUpdate }: { project: Project; onUpdate: (fn: (
       {error && (
         <div className="glass flex items-center justify-between rounded-2xl border-destructive p-5 text-sm">
           <span>{error}</span>
-          <button onClick={() => (awaitingApproval ? (project.preview ? approvePreview() : renderPreview()) : project.iterations.length && !project.iterations.at(-1)!.render ? renderAgain() : run())} className="rounded-full bg-brand px-4 py-1.5 text-primary-foreground">Try again</button>
+          <button onClick={() => (!priced ? (project.preview ? approvePreview() : renderPreview()) : project.iterations.at(-1)!.render ? run() : renderAgain())} className="rounded-full bg-brand px-4 py-1.5 text-primary-foreground">Try again</button>
         </div>
-      )}
-
-      {!busy && project.iterations.length > 0 && (
-        <section className="glass glow rounded-3xl p-6">
-          {project.accepted ? (
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="flex items-center gap-2 font-display text-lg font-bold text-brand"><Check className="h-5 w-5" /> You're going with this plan.</p>
-              <button onClick={() => { onUpdate((p) => ({ ...p, accepted: false })); setShowChange(true); }} className="rounded-full border border-border px-4 py-2 text-sm hover:bg-accent">Change it anyway</button>
-            </div>
-          ) : showChange ? (
-            <div className="space-y-3">
-              <p className="font-display text-lg font-bold text-brand">What should change?</p>
-              <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)} rows={3} placeholder="e.g. Keep it under $10k, use darker cabinets and open shelving instead of uppers" className="w-full resize-none rounded-xl bg-muted px-4 py-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
-              <div className="flex gap-2">
-                <button disabled={!feedback.trim()} onClick={() => { const f = feedback; setFeedback(""); setShowChange(false); run(f); }} className="flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm text-primary-foreground disabled:opacity-40"><RefreshCw className="h-4 w-4" /> Generate new version</button>
-                <button onClick={() => setShowChange(false)} className="rounded-full px-4 py-2 text-sm hover:bg-accent">Cancel</button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="font-display text-lg font-bold">Happy with the plan?</p>
-              <div className="flex gap-2">
-                <button onClick={() => onUpdate((p) => ({ ...p, accepted: true }))} className="flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm text-primary-foreground"><Check className="h-4 w-4" /> Go with this</button>
-                <button onClick={() => setShowChange(true)} className="flex items-center gap-2 rounded-full bg-secondary px-5 py-2 text-sm"><RefreshCw className="h-4 w-4" /> Change it</button>
-              </div>
-            </div>
-          )}
-        </section>
       )}
     </div>
   );
@@ -417,13 +471,13 @@ function ProjectView({ project, onUpdate }: { project: Project; onUpdate: (fn: (
   }
 }
 
-function IterationView({ it, index, total, original }: { it: Iteration; index: number; total: number; original: string }) {
+function IterationView({ it, index, total, original, hideCompare }: { it: Iteration; index: number; total: number; original: string; hideCompare?: boolean }) {
   const { plan } = it;
   return (
     <article className="space-y-6 fade-up">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <span className="rounded-full bg-secondary px-3 py-1 text-xs">Version {index + 1}{index === total - 1 ? " · latest" : ""}</span>
-        <h2 className="font-display text-2xl font-bold text-brand">{plan.title}</h2>
+        <h2 className="line-clamp-2 break-words font-display text-2xl font-bold text-brand">{plan.title}</h2>
       </div>
       <p className="text-sm">{plan.summary}</p>
 
@@ -499,16 +553,18 @@ function IterationView({ it, index, total, original }: { it: Iteration; index: n
         </section>
       )}
 
-      <section>
-        <h3 className="mb-3 font-bold text-brand">Before & after</h3>
-        <div className="grid gap-4 md:grid-cols-2">
-          <figure className="glass overflow-hidden rounded-2xl"><img src={original} alt="Before" className="aspect-square w-full object-cover" /><figcaption className="px-4 py-2 text-xs text-muted-foreground">Your photo</figcaption></figure>
-          <figure className="glass overflow-hidden rounded-2xl">
-            {it.render ? <img src={it.render} alt="After renovation" className="aspect-square w-full object-cover" /> : <div className="grid aspect-square place-items-center text-sm text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin text-brand" /></div>}
-            <figcaption className="px-4 py-2 text-xs text-muted-foreground">Finished renovation</figcaption>
-          </figure>
-        </div>
-      </section>
+      {!hideCompare && it.render && (
+        <section>
+          <h3 className="mb-3 font-bold text-brand">Before & after</h3>
+          <div className="grid gap-4 md:grid-cols-2">
+            <figure className="glass overflow-hidden rounded-2xl"><img src={original} alt="Before" className="aspect-square w-full object-cover" /><figcaption className="px-4 py-2 text-xs text-muted-foreground">Your photo</figcaption></figure>
+            <figure className="glass overflow-hidden rounded-2xl">
+              <img src={it.render} alt="After renovation" className="aspect-square w-full object-cover" />
+              <figcaption className="px-4 py-2 text-xs text-muted-foreground">Finished renovation</figcaption>
+            </figure>
+          </div>
+        </section>
+      )}
       {it.feedback && <p className="rounded-xl border-l-2 border-brand bg-muted px-4 py-2 text-sm">You asked to change: “{it.feedback}”</p>}
     </article>
   );

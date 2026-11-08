@@ -48,4 +48,26 @@ describe("ideas to Renovo plan", () => {
     expect(plan.diagrams).toEqual([]);
     expect(plan.renderPrompt).toContain("Replace the kitchen worktops");
   });
+
+  it("prefers the model's short title", () => {
+    const plan = buildPlan(input, { ...ideas, title: "Painted Kitchen Refresh" });
+
+    expect(plan.title).toBe("Painted Kitchen Refresh");
+  });
+
+  it("keeps a fallback title short and on a word boundary", () => {
+    const plan = buildPlan(
+      {
+        ...input,
+        renovation:
+          "Installing vertical wooden plank style floor tiles or vinyl planks involves surfacing and adhesive work",
+      },
+      ideas,
+    );
+
+    expect(plan.title.length).toBeLessThanOrEqual(48);
+    expect(plan.title.split(" ").length).toBeLessThanOrEqual(6);
+    expect(plan.title).not.toMatch(/[.,;:!?]$/);
+    expect(plan.title.split(" ").at(-1)).toBeTruthy();
+  });
 });
