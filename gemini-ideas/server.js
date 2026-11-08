@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generateIdeas, GeminiError, MODEL_NAME } from './lib/gemini.js';
+import { loadEnvFile } from './lib/env.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PUBLIC_DIR = join(__dirname, 'public');
@@ -19,21 +20,6 @@ const MIME_TYPES = {
   '.jpg': 'image/jpeg',
   '.ico': 'image/x-icon',
 };
-
-// Loads .env without pulling in a dependency. Existing env vars win.
-async function loadEnvFile() {
-  try {
-    const text = await readFile(join(__dirname, '.env'), 'utf8');
-    for (const line of text.split('\n')) {
-      const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
-      if (!match || line.trim().startsWith('#')) continue;
-      const value = match[2].replace(/^(['"])(.*)\1$/, '$2');
-      if (process.env[match[1]] === undefined) process.env[match[1]] = value;
-    }
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-  }
-}
 
 function sendJson(res, status, payload) {
   const body = JSON.stringify(payload);
@@ -143,6 +129,7 @@ const server = createServer(async (req, res) => {
     sendJson(res, 405, { error: 'Method not allowed.' });
   } catch (error) {
     if (error instanceof GeminiError) {
+      if (error.status >= 500) console.error(`[gemini] ${error.status}: ${error.message}`);
       sendJson(res, error.status, { error: error.message });
       return;
     }
@@ -152,10 +139,12 @@ const server = createServer(async (req, res) => {
   }
 });
 
-await loadEnvFile();
+await loadEnvFile(__dirname);
 
 server.listen(PORT, HOST, () => {
-  const keyState = process.env.GEMINI_API_KEY ? 'configured' : 'MISSING - add GEMINI_API_KEY to gemini-ideas/.env';
+  const keyState = process.env.GEMINI_API_KEY
+    ? 'configured'
+    : `MISSING - create ${join(__dirname, '.env')} with GEMINI_API_KEY=your-key, then restart`;
   console.log(`Renovation ideas test UI: http://localhost:${PORT}`);
   console.log(`Model: ${MODEL_NAME} | API key: ${keyState}`);
 });

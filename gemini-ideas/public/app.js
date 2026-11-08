@@ -1,5 +1,6 @@
 const form = document.querySelector('#renovation-form');
 const submitButton = document.querySelector('#submit-button');
+const serverNotice = document.querySelector('#server-notice');
 const statusEl = document.querySelector('#status');
 const resultsEl = document.querySelector('#results');
 const summaryEl = document.querySelector('#summary');
@@ -128,3 +129,25 @@ form.addEventListener('submit', async (event) => {
     submitButton.textContent = resultsEl.hidden ? 'Generate tools & steps' : 'Regenerate tools & steps';
   }
 });
+
+// Tell the user up front when this server has no key, instead of only failing on submit.
+async function checkServerConfig() {
+  try {
+    const response = await fetch('/api/health');
+    const health = await response.json();
+
+    if (!health.apiKeyConfigured) {
+      serverNotice.textContent =
+        `This server has no Gemini key (model ${health.model}). Add GEMINI_API_KEY to gemini-ideas/.env ` +
+        'and restart the server - the file must sit next to server.js, not in the repo root.';
+      serverNotice.hidden = false;
+    } else {
+      serverNotice.hidden = true;
+    }
+  } catch {
+    serverNotice.textContent = 'Could not reach the server API. Is server.js still running?';
+    serverNotice.hidden = false;
+  }
+}
+
+checkServerConfig();

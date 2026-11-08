@@ -164,7 +164,10 @@ export async function generateIdeas(input) {
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
-    throw new GeminiError('GEMINI_API_KEY is not set on the server.', 500);
+    throw new GeminiError(
+      'GEMINI_API_KEY is not set on this server. Add it to gemini-ideas/.env next to server.js and restart the server, then check /api/health.',
+      500,
+    );
   }
 
   const url = `${API_BASE}/${encodeURIComponent(DEFAULT_MODEL)}:generateContent`;
