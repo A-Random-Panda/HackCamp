@@ -1,6 +1,13 @@
-# Secrets — never commit the real key file
+# Secrets — never commit real env files; .env.example is the only env template
 .env
-.env.local
+.env.*
+!.env.example
+
+# Node dependencies
+node_modules/
+
+# Logs
+*.log
 
 # Python virtual environment
 .venv/
