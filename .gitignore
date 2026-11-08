@@ -1,0 +1,19 @@
+# Secrets — never commit the real key file
+.env
+.env.local
+
+# Python virtual environment
+.venv/
+venv/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local debugging output (saved test images)
+_test_output/
+
+# OS noise
+.DS_Store
+Thumbs.db

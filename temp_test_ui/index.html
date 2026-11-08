@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  TEMP TEST UI  --  NOT THE PRODUCT UI
+  ----------------------------------------------------------------------------
+  Throwaway page for manually testing the image-edit endpoint.
+  The real UI is being built by a teammate; this file only exists so we can
+  upload a photo, ask for a change, and eyeball the result before/after.
+  Delete it whenever -- nothing else in the project depends on it.
+  Served by main.py at http://127.0.0.1:8000/test-ui
+  ============================================================================
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TEMP TEST UI - AI Renovator image edit</title>
+<style>
+  :root {
+    --bg: #12141a;
+    --panel: #1a1d26;
+    --panel-2: #222633;
+    --line: #2e3444;
+    --text: #e7eaf0;
+    --muted: #939bb0;
+    --accent: #7c9cff;
+    --ok: #3ddc97;
+    --err: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1200px; margin: 0 auto; }
+  .banner {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    background: #3a2a12; border: 1px solid #6b4b1c; color: #ffd08a;
+    padding: 10px 14px; border-radius: 8px; margin-bottom: 20px; font-size: 13px;
+  }
+  .banner strong { letter-spacing: .08em; font-size: 12px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: 360px 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  label { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 0 6px; }
+  label:first-of-type { margin-top: 0; }
+  textarea, input[type=file] {
+    width: 100%; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: inherit; font-size: 14px;
+  }
+  textarea { resize: vertical; min-height: 78px; }
+  textarea:focus, input[type=file]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  button {
+    font: inherit; font-weight: 600; cursor: pointer;
+    border-radius: 8px; border: 1px solid transparent; padding: 10px 16px;
+  }
+  #generate {
+    width: 100%; margin-top: 18px; background: var(--accent); color: #0d1020;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+  }
+  #generate:disabled { opacity: .65; cursor: progress; }
+  .spinner {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid rgba(0,0,0,.25); border-top-color: #0d1020;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .ghost { background: transparent; border-color: var(--line); color: var(--text); font-size: 13px; padding: 7px 12px; }
+  .ghost:hover:not(:disabled) { border-color: var(--accent); }
+  .ghost:disabled { opacity: .4; cursor: not-allowed; }
+  #status { margin-top: 12px; font-size: 13px; color: var(--muted); min-height: 18px; }
+  .error {
+    margin-top: 14px; background: #2a1417; border: 1px solid #6b2630; color: #ffc3c3;
+    padding: 12px; border-radius: 8px; font-size: 13px; white-space: pre-wrap;
+  }
+  .error code { color: var(--err); font-weight: 600; }
+  .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 700px) { .panes { grid-template-columns: 1fr; } }
+  .pane-title {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin-bottom: 8px;
+  }
+  .stage {
+    background: var(--panel-2); border: 1px dashed var(--line); border-radius: 8px;
+    min-height: 300px; display: flex; align-items: center; justify-content: center;
+    overflow: hidden; color: var(--muted); font-size: 13px; text-align: center; padding: 12px;
+  }
+  .stage img { width: 100%; height: auto; display: block; border-radius: 4px; }
+  .model-note {
+    margin-top: 12px; font-size: 13px; color: var(--muted);
+    border-left: 2px solid var(--line); padding-left: 10px; white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="banner">
+    <strong>TEMP TEST UI</strong>
+    <span>Throwaway harness for the image-edit endpoint. Not the final app &mdash; the real UI is built separately.</span>
+  </div>
+
+  <h1>AI Renovator &mdash; edit a room photo</h1>
+  <div class="sub">Upload a room photo, describe the change, optionally add restrictions. Model: <code>flux-2-klein-4b</code> on Cloudflare Workers AI</div>
+
+  <div class="grid">
+
+    <!-- ============ controls ============ -->
+    <form class="card" id="form" autocomplete="off">
+      <label for="file">Room photo</label>
+      <input type="file" id="file" accept="image/jpeg,image/png,image/webp">
+      <div class="hint">JPEG, PNG or WebP, up to 20 MB. Any photo works &mdash; including a previous result.</div>
+
+      <label for="change">What should change?</label>
+      <textarea id="change" placeholder="e.g. Restyle this living room in warm minimal Scandinavian style with an oak floor and a cream linen sofa."></textarea>
+
+      <label for="restrictions">Restrictions (optional)</label>
+      <textarea id="restrictions" placeholder="e.g. No structural changes. Keep the window and radiator exactly where they are."></textarea>
+
+      <button type="submit" id="generate">
+        <span id="generate-label">Generate</span>
+      </button>
+
+      <div id="status"></div>
+      <div class="error" id="error" hidden></div>
+
+      <div style="margin-top:18px; display:flex; gap:8px; flex-wrap:wrap">
+        <button type="button" class="ghost" id="use-result" disabled>Use result as new input</button>
+        <button type="button" class="ghost" id="reset">Reset</button>
+      </div>
+      <div class="hint">"Use result as new input" is the reprompt loop: tweak the change text, generate again from the last output.</div>
+    </form>
+
+    <!-- ============ before / after ============ -->
+    <div class="card">
+      <div class="panes">
+        <div>
+          <div class="pane-title"><span>Original</span><span id="original-dims"></span></div>
+          <div class="stage" id="original-stage">No photo yet</div>
+        </div>
+        <div>
+          <div class="pane-title"><span>Result</span><span id="result-dims"></span></div>
+          <div class="stage" id="result-stage">Nothing generated yet</div>
+        </div>
+      </div>
+      <div class="model-note" id="model-note" hidden></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// TEMP TEST UI logic. Vanilla JS, no build step -- keep it disposable.
+// ---------------------------------------------------------------------------
+
+// Same origin, because main.py serves this page. Point this elsewhere if you
+// ever open index.html directly from disk instead of through the server.
+const API_BASE = "";
+
+const form = document.getElementById("form");
+const fileInput = document.getElementById("file");
+const changeInput = document.getElementById("change");
+const restrictionsInput = document.getElementById("restrictions");
+const generateBtn = document.getElementById("generate");
+const generateLabel = document.getElementById("generate-label");
+const statusEl = document.getElementById("status");
+const errorEl = document.getElementById("error");
+const originalStage = document.getElementById("original-stage");
+const resultStage = document.getElementById("result-stage");
+const originalDims = document.getElementById("original-dims");
+const resultDims = document.getElementById("result-dims");
+const modelNote = document.getElementById("model-note");
+const useResultBtn = document.getElementById("use-result");
+const resetBtn = document.getElementById("reset");
+
+let resultBlob = null;      // last generated image, for the reprompt loop
+let previewUrl = null;      // object URL for the original pane
+let resultUrl = null;       // object URL for the result pane
+let timerId = null;
+
+// ---- helpers --------------------------------------------------------------
+function showError(code, message) {
+  errorEl.hidden = false;
+  errorEl.innerHTML = "";
+  const codeEl = document.createElement("code");
+  codeEl.textContent = code || "error";
+  errorEl.appendChild(codeEl);
+  errorEl.appendChild(document.createElement("br"));
+  errorEl.appendChild(document.createTextNode(message || "Unknown error."));
+}
+
+function clearError() {
+  errorEl.hidden = true;
+  errorEl.textContent = "";
+}
+
+function setLoading(isLoading) {
+  generateBtn.disabled = isLoading;
+  generateLabel.textContent = isLoading ? "Generating..." : "Generate";
+  if (!isLoading) {
+    document.getElementById("spinner")?.remove();
+  } else {
+    const spinner = document.createElement("span");
+    spinner.className = "spinner";
+    spinner.id = "spinner";
+    generateBtn.prepend(spinner);
+  }
+}
+
+function startTimer() {
+  const started = Date.now();
+  statusEl.textContent = "Working... 0s";
+  clearInterval(timerId);
+  timerId = setInterval(() => {
+    statusEl.textContent = `Working... ${Math.round((Date.now() - started) / 1000)}s`;
+  }, 250);
+}
+
+function stopTimer() { clearInterval(timerId); timerId = null; }
+
+function renderPreviewInto(stage, url, dimsEl) {
+  stage.textContent = "";
+  const img = new Image();
+  img.alt = "preview";
+  img.onload = () => { dimsEl.textContent = `${img.naturalWidth} x ${img.naturalHeight}`; };
+  img.src = url;
+  stage.appendChild(img);
+}
+
+function showOriginalFromBlob(blob) {
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  previewUrl = URL.createObjectURL(blob);
+  renderPreviewInto(originalStage, previewUrl, originalDims);
+}
+
+// ---- file picker ----------------------------------------------------------
+fileInput.addEventListener("change", () => {
+  const file = fileInput.files && fileInput.files[0];
+  clearError();
+  if (!file) return;
+  showOriginalFromBlob(file);
+  statusEl.textContent = "";
+});
+
+// ---- generate -------------------------------------------------------------
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  clearError();
+  modelNote.hidden = true;
+
+  const file = fileInput.files && fileInput.files[0];
+  if (!file) { showError("no_image", "Choose a room photo first."); return; }
+  if (!changeInput.value.trim()) { showError("empty_change_request", "Describe the change you want."); return; }
+
+  const body = new FormData();
+  body.append("image", file);
+  body.append("change_request", changeInput.value);
+  body.append("restrictions", restrictionsInput.value);
+
+  setLoading(true);
+  startTimer();
+
+  try {
+    const response = await fetch(`${API_BASE}/api/edit`, { method: "POST", body });
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok || !data || !data.ok) {
+      const err = data && data.error ? data.error : {};
+      showError(err.code || `http_${response.status}`, err.message || response.statusText);
+      statusEl.textContent = "";
+      return;
+    }
+
+    // JSON carries base64 -- turn it back into an image blob + object URL.
+    const binary = atob(data.image_base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    resultBlob = new Blob([bytes], { type: data.image_mime_type || "image/png" });
+
+    if (resultUrl) URL.revokeObjectURL(resultUrl);
+    resultUrl = URL.createObjectURL(resultBlob);
+    renderPreviewInto(resultStage, resultUrl, resultDims);
+
+    useResultBtn.disabled = false;
+    statusEl.textContent = `Done in ${(data.latency_ms / 1000).toFixed(1)}s  -  model ${data.model}`;
+
+    if (data.message) {
+      modelNote.hidden = false;
+      modelNote.textContent = `Model note: ${data.message}`;
+    }
+  } catch (networkError) {
+    // Server down, CORS problem, offline...
+    showError("network_error", `Could not reach the server at ${API_BASE || "(same origin)"}. Is main.py running?`);
+    statusEl.textContent = "";
+  } finally {
+    stopTimer();
+    setLoading(false);
+  }
+});
+
+// ---- reprompt loop --------------------------------------------------------
+useResultBtn.addEventListener("click", () => {
+  if (!resultBlob) return;
+  const transfer = new DataTransfer();
+  transfer.items.add(new File([resultBlob], "previous-result.png", { type: resultBlob.type }));
+  fileInput.files = transfer.files;
+  showOriginalFromBlob(resultBlob);
+  clearError();
+  statusEl.textContent = "Now editing the previous result. Change the text above and generate again.";
+});
+
+// ---- reset ----------------------------------------------------------------
+resetBtn.addEventListener("click", () => {
+  form.reset();
+  resultBlob = null;
+  clearError();
+  useResultBtn.disabled = true;
+  modelNote.hidden = true;
+  originalStage.textContent = "No photo yet";
+  resultStage.textContent = "Nothing generated yet";
+  originalDims.textContent = "";
+  resultDims.textContent = "";
+  statusEl.textContent = "";
+});
+</script>
+</body>
+</html>
