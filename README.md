@@ -8,6 +8,19 @@ storage — images are processed entirely in memory.
 
 **Model: Cloudflare Workers AI `@cf/black-forest-labs/flux-2-klein-4b` (FLUX.2 [klein] 4B).**
 
+## Repository layout
+
+Both AI Renovator features live here, and each runs independently:
+
+| Path | Feature | Runtime | Local URL |
+|---|---|---|---|
+| repo root (`main.py`, `cloudflare_edit.py`) | Photo in, renovated room photo out | Python / FastAPI | <http://127.0.0.1:8000/test-ui> |
+| `gemini-ideas/` | Tools, rough prices, local stores and steps | dependency-free Node | <http://localhost:3000> |
+
+They share the same Cloudflare Workers AI account but read separate env files: root `.env`
+for the image API and `gemini-ideas/.env` for the ideas app. Setup for the ideas side is in
+[`gemini-ideas/README.md`](gemini-ideas/README.md).
+
 ---
 
 ## Status: working, on the free tier
