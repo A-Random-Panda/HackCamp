@@ -108,11 +108,18 @@ if ($busy.Count -gt 0) {
 
 $rootKey = Get-EnvValue (Join-Path $root '.env') 'HACKCLUB_AI_API_KEY'
 $ideasKey = Get-EnvValue (Join-Path $root 'gemini-ideas\.env') 'GEMINI_API_KEY'
-if (-not $rootKey -or $rootKey -like '*your-api-key*') {
+$rootIdeasKey = Get-EnvValue (Join-Path $root '.env') 'GEMINI_API_KEY'
+$hasRootKey = ($null -ne $rootKey) -and ($rootKey -notlike '*your-api-key*')
+$hasIdeasKey = ($null -ne $ideasKey) -and ($ideasKey -notlike '*your-api-key*')
+$hasRootIdeasKey = ($null -ne $rootIdeasKey) -and ($rootIdeasKey -notlike '*your-api-key*')
+
+if (-not $hasRootKey) {
     Write-Host "WARNING: HACKCLUB_AI_API_KEY is missing from .env - image previews will fail." -ForegroundColor Yellow
 }
-if (-not $ideasKey -or $ideasKey -like '*your-api-key*') {
+if (-not $hasIdeasKey -and -not $hasRootIdeasKey) {
     Write-Host "WARNING: GEMINI_API_KEY is missing from gemini-ideas\.env - pricing will fail." -ForegroundColor Yellow
+} elseif (-not $hasIdeasKey) {
+    Write-Host "NOTE: gemini-ideas\.env has no key; reusing GEMINI_API_KEY from .env for pricing." -ForegroundColor DarkGray
 }
 
 # ---------------------------------------------------------------------------
@@ -129,13 +136,16 @@ $image = Start-Process -FilePath $python `
 [void]$started.Add($image)
 
 $previousPort = $env:PORT
+$previousIdeasKey = $env:GEMINI_API_KEY
 $env:PORT = '3000'
+if (-not $hasIdeasKey -and $hasRootIdeasKey) { $env:GEMINI_API_KEY = $rootIdeasKey }
 $ideas = Start-Process -FilePath $bun `
     -ArgumentList @('gemini-ideas/server.js') `
     -NoNewWindow -PassThru `
     -RedirectStandardOutput (Join-Path $logDir 'ideas.out.log') `
     -RedirectStandardError (Join-Path $logDir 'ideas.err.log')
 if ($null -eq $previousPort) { Remove-Item Env:PORT -ErrorAction SilentlyContinue } else { $env:PORT = $previousPort }
+if ($null -eq $previousIdeasKey) { Remove-Item Env:GEMINI_API_KEY -ErrorAction SilentlyContinue } else { $env:GEMINI_API_KEY = $previousIdeasKey }
 [void]$started.Add($ideas)
 
 $gui = Start-Process -FilePath $bun `

@@ -19,7 +19,8 @@ configurable with environment variables.
 | `src/` | Primary Renovo GUI | React / TanStack Start | <http://localhost:5173> |
 
 The two backends read separate env files: root `.env` for the Hack Club image API and
-`gemini-ideas/.env` for the Google Gemini ideas API.
+`gemini-ideas/.env` for the Google Gemini ideas API. `dev.bat` falls back to
+`GEMINI_API_KEY` in the root `.env` when `gemini-ideas/.env` is missing.
 
 ## Quick start
 
