@@ -22,6 +22,41 @@ The two backends read separate env files: root `.env` for the image API and
 
 ## Quick start
 
+### Recommended: one launcher (Windows)
+
+After the one-time setup below, start everything with:
+
+```bat
+dev.bat
+```
+
+It starts the image API, the ideas API and the GUI in one console, waits until each one
+answers, then prints the URLs:
+
+| Service | URL |
+|---|---|
+| GUI | <http://127.0.0.1:8080/> |
+| Image API test page | <http://127.0.0.1:8000/test-ui> |
+| Ideas API | <http://127.0.0.1:3000/> |
+
+Press Ctrl+C or close the window to stop all three; nothing keeps a port busy. Logs are
+written to `_test_output\dev\`.
+
+From Git Bash or PowerShell, run the same thing with:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1
+```
+
+The launcher checks the prerequisites before starting and tells you the exact command to
+fix a missing `.venv`, missing `node_modules` or a port that is already taken. It never
+installs packages or edits env files; it only warns when `HACKCLUB_AI_API_KEY` is missing
+from `.env` or `gemini-ideas\.env`.
+
+### Run the services yourself
+
+Use these when debugging a single service, or on macOS/Linux where `dev.bat` does not run.
+
 ### Image API
 
 ```bash
