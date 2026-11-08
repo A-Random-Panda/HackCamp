@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Gemini-powered renovation tools, resources and steps with a temporary test UI",
+  "description": "Cloudflare Workers AI-powered renovation tools, resources and steps with a temporary test UI",
   "scripts": {
     "start": "node server.js",
     "check": "node check.mjs"

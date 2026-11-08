@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { generateIdeas, GeminiError, getModelCandidates, getModelName } from './lib/gemini.js';
+import { generateIdeas, CloudflareAIError, getModelCandidates, getModelName } from './lib/cloudflare-ai.js';
 import { loadEnvFile } from './lib/env.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -36,7 +36,7 @@ async function readJsonBody(req, limitBytes = 64 * 1024) {
 
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > limitBytes) throw new GeminiError('Request body is too large.', 413);
+    if (size > limitBytes) throw new CloudflareAIError('Request body is too large.', 413);
     chunks.push(chunk);
   }
 
@@ -45,7 +45,7 @@ async function readJsonBody(req, limitBytes = 64 * 1024) {
   try {
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   } catch {
-    throw new GeminiError('Request body must be valid JSON.', 400);
+    throw new CloudflareAIError('Request body must be valid JSON.', 400);
   }
 }
 
@@ -53,11 +53,11 @@ function validateInput(body) {
   const description = typeof body.description === 'string' ? body.description.trim() : '';
 
   if (description.length < 10) {
-    throw new GeminiError('Please describe the renovation in at least 10 characters.', 400);
+    throw new CloudflareAIError('Please describe the renovation in at least 10 characters.', 400);
   }
 
   if (description.length > 2000) {
-    throw new GeminiError('Please keep the description under 2000 characters.', 400);
+    throw new CloudflareAIError('Please keep the description under 2000 characters.', 400);
   }
 
   const roomType = typeof body.roomType === 'string' ? body.roomType.trim().slice(0, 60) : '';
@@ -113,11 +113,17 @@ const server = createServer(async (req, res) => {
     }
 
     if (url.pathname === '/api/health') {
+      const accountIdConfigured = Boolean(process.env.CLOUDFLARE_ACCOUNT_ID);
+      const tokenConfigured = Boolean(process.env.CLOUDFLARE_API_TOKEN);
+
       sendJson(res, 200, {
         ok: true,
+        provider: 'cloudflare-workers-ai',
         model: getModelName(),
         fallbackModels: getModelCandidates().slice(1),
-        apiKeyConfigured: Boolean(process.env.GEMINI_API_KEY),
+        apiKeyConfigured: accountIdConfigured && tokenConfigured,
+        accountIdConfigured,
+        tokenConfigured,
       });
       return;
     }
@@ -129,8 +135,8 @@ const server = createServer(async (req, res) => {
 
     sendJson(res, 405, { error: 'Method not allowed.' });
   } catch (error) {
-    if (error instanceof GeminiError) {
-      if (error.status >= 500) console.error(`[gemini] ${error.status}: ${error.message}`);
+    if (error instanceof CloudflareAIError) {
+      if (error.status >= 500) console.error(`[cloudflare-ai] ${error.status}: ${error.message}`);
       sendJson(res, error.status, { error: error.message });
       return;
     }
@@ -146,9 +152,17 @@ const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 
 server.listen(PORT, HOST, () => {
-  const keyState = process.env.GEMINI_API_KEY
-    ? 'configured'
-    : `MISSING - create ${join(__dirname, '.env')} with GEMINI_API_KEY=your-key, then restart`;
+  const hasAccount = Boolean(process.env.CLOUDFLARE_ACCOUNT_ID);
+  const hasToken = Boolean(process.env.CLOUDFLARE_API_TOKEN);
+  const missing = [!hasAccount && 'CLOUDFLARE_ACCOUNT_ID', !hasToken && 'CLOUDFLARE_API_TOKEN'].filter(Boolean);
+  const keyState = missing.length
+    ? `MISSING - set ${missing.join(' and ')} in ${join(__dirname, '.env')}, then restart`
+    : 'configured';
+
   console.log(`Renovation ideas test UI: http://localhost:${PORT}`);
-  console.log(`Model: ${getModelName()} (fallbacks: ${getModelCandidates().slice(1).join(', ')}) | API key: ${keyState}`);
+  console.log(
+    `Provider: Cloudflare Workers AI | Model: ${getModelName()} (fallbacks: ${getModelCandidates()
+      .slice(1)
+      .join(', ')}) | Credentials: ${keyState}`,
+  );
 });

@@ -1,12 +1,14 @@
 // One-command self-check: node check.mjs
-// Verifies the key is present, accepted by Google, that the model exists for
-// this key, and that a real ideas request comes back. Never prints the key.
+// Verifies the Cloudflare account ID and token are present, that Workers AI is
+// reachable for that token, and that a real ideas request comes back.
+// Never prints the token.
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { loadEnvFile } from './lib/env.js';
-import { generateIdeas, GeminiError, getModelCandidates, getModelName } from './lib/gemini.js';
+import { generateIdeas, CloudflareAIError, getModelCandidates, getModelName } from './lib/cloudflare-ai.js';
 
 const dir = fileURLToPath(new URL('.', import.meta.url));
+const API_BASE = 'https://api.cloudflare.com/client/v4';
 let failures = 0;
 
 function pass(message) {
@@ -24,73 +26,78 @@ function info(message) {
 }
 
 const envFileLoaded = await loadEnvFile(dir);
-const apiKey = process.env.GEMINI_API_KEY;
+const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+const apiToken = process.env.CLOUDFLARE_API_TOKEN;
 
-console.log(`\nAI Renovator - Gemini ideas check (${getModelName()})\n`);
+console.log(`\nAI Renovator - Cloudflare Workers AI check (${getModelName()})\n`);
 info(`Working directory: ${dir}`);
 info(`.env file: ${envFileLoaded ? 'found' : 'not found'}`);
-info(`GEMINI_API_KEY source: ${envFileLoaded ? '.env and/or environment' : 'environment only'}`);
+info(`Credentials source: ${envFileLoaded ? '.env and/or environment' : 'environment only'}`);
 
-if (!apiKey) {
+if (!accountId) {
   fail(
-    'GEMINI_API_KEY is not set.',
-    `Create ${join(dir, '.env')} containing GEMINI_API_KEY=your-key and run this again.`,
+    'CLOUDFLARE_ACCOUNT_ID is not set.',
+    `Find it in the Cloudflare dashboard (Workers & Pages -> Account ID), add it to ${join(dir, '.env')} and run this again.`,
   );
-  console.log('\nStopping here because nothing else can be checked without a key.\n');
+}
+
+if (!apiToken) {
+  fail(
+    'CLOUDFLARE_API_TOKEN is not set.',
+    `Create an API token with Workers AI permission and add it to ${join(dir, '.env')}, then run this again.`,
+  );
+}
+
+if (!accountId || !apiToken) {
+  console.log('\nStopping here because nothing else can be checked without credentials.\n');
   process.exit(1);
 }
 
-pass(`GEMINI_API_KEY is set (${apiKey.length} characters, starts with ${apiKey.slice(0, 4)}...)`);
+pass(`CLOUDFLARE_ACCOUNT_ID is set (${accountId.length} characters)`);
+pass(`CLOUDFLARE_API_TOKEN is set (${apiToken.length} characters, starts with ${apiToken.slice(0, 4)}...)`);
 
-// Step 1: is the key accepted at all?
-let models = [];
+// Step 1: is the token active at all?
 try {
-  const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000', {
-    headers: { 'x-goog-api-key': apiKey },
+  const response = await fetch(`${API_BASE}/user/tokens/verify`, {
+    headers: { authorization: `Bearer ${apiToken}` },
     signal: AbortSignal.timeout(20_000),
   });
+  const data = await response.json().catch(() => null);
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    let detail = body.slice(0, 300);
-    try {
-      detail = JSON.parse(body)?.error?.message ?? detail;
-    } catch {
-      // keep raw text
-    }
-    fail(`Google rejected the key (HTTP ${response.status}).`, detail);
+  if (!response.ok || data?.success === false) {
+    const detail = (data?.errors || []).map((entry) => entry.message).filter(Boolean).join('; ');
+    fail(`Cloudflare rejected the token (HTTP ${response.status}).`, detail || 'No details returned.');
     console.log('');
     process.exit(1);
   }
 
-  const data = await response.json();
-  models = (data.models || []).map((model) => String(model.name || '').replace(/^models\//, ''));
-  pass(`Google accepted the key (${models.length} models visible)`);
+  pass(`Cloudflare accepted the token (status: ${data?.result?.status || 'active'})`);
 } catch (error) {
-  fail('Could not reach the Gemini API.', error.message);
+  fail('Could not reach the Cloudflare API.', error.message);
   console.log('');
   process.exit(1);
 }
 
-// Step 2: does this key have the model this app asks for, and the fallbacks?
-const candidates = getModelCandidates();
-const [primary, ...fallbacks] = candidates;
+// Step 2: can this token actually reach Workers AI for this account?
+try {
+  const response = await fetch(`${API_BASE}/accounts/${accountId}/ai/models/search?per_page=1`, {
+    headers: { authorization: `Bearer ${apiToken}` },
+    signal: AbortSignal.timeout(20_000),
+  });
+  const data = await response.json().catch(() => null);
 
-if (models.includes(primary)) {
-  pass(`Model ${primary} is available to this key`);
-} else {
-  const textModels = models.filter((name) => /flash|pro/.test(name) && !/image|tts|live|audio|video|embed/.test(name));
-  fail(
-    `Model ${primary} is not in this key's model list.`,
-    textModels.length
-      ? `Try one of: ${textModels.slice(0, 8).join(', ')} - set it with GEMINI_MODEL=<name> in .env`
-      : 'No text models listed for this key; check the project in Google AI Studio.',
-  );
-}
-
-if (fallbacks.length) {
-  const available = fallbacks.filter((model) => models.includes(model));
-  info(`Fallback models available: ${available.length ? available.join(', ') : 'none of ' + fallbacks.join(', ')}`);
+  if (!response.ok || data?.success === false) {
+    const detail =
+      (data?.errors || []).map((entry) => `${entry.code}: ${entry.message}`).join(' | ') || `HTTP ${response.status}`;
+    fail(
+      'Workers AI is not reachable for this account and token.',
+      `${detail} - check the account ID and that the token includes Workers AI: Read.`,
+    );
+  } else {
+    pass('Workers AI is reachable for this account');
+  }
+} catch (error) {
+  fail('Could not query the Workers AI model catalog.', error.message);
 }
 
 // Step 3: a real generation through the app's own code path.
@@ -102,7 +109,7 @@ try {
     constraints: 'Renting, one weekend, no experience.',
   });
 
-  pass(`Gemini returned a response the app could parse (answered by ${ideas.model})`);
+  pass(`Cloudflare AI returned a response the app could parse (answered by ${ideas.model})`);
   info(`Summary: ${ideas.summary || '(empty)'}`);
   info(`Rough budget: ${ideas.budget || '(empty)'}`);
   info(`Tools/resources: ${ideas.toolsAndResources.length}`);
@@ -111,18 +118,36 @@ try {
   if (ideas.steps[0]) info(`First step: ${ideas.steps[0].order}. ${ideas.steps[0].title}`);
   if (ideas.toolsAndResources[0]) {
     const first = ideas.toolsAndResources[0];
-    info(`First tool: ${first.name} | price: ${first.estimatedPrice || '(missing)'} | buy at: ${first.whereToBuy?.join(', ') || '(missing)'}`);
+    info(
+      `First tool: ${first.name} | price: ${first.estimatedPrice || '(missing)'} | buy at: ${
+        first.whereToBuy?.join(', ') || '(missing)'
+      }`,
+    );
   }
   if (ideas.stores[0]) info(`First store: ${ideas.stores[0].name} (${ideas.stores[0].type})`);
 
   const priced = ideas.toolsAndResources.filter((tool) => tool.estimatedPrice).length;
   if (!priced) fail('No tool/resource has a price.', 'Check estimatedPrice in the schema and prompt.');
+
+  const withoutStore = ideas.toolsAndResources.filter((tool) => !tool.whereToBuy?.length);
+  if (withoutStore.length) {
+    fail(
+      `${withoutStore.length} tool(s)/resource(s) have no whereToBuy store.`,
+      `Check whereToBuy in the schema and prompt (missing: ${withoutStore.map((tool) => tool.name).join(', ')}).`,
+    );
+  }
+
   if (!ideas.stores.length) fail('No local stores were returned.', 'Check the stores field in the schema and prompt.');
   if (!ideas.budget) fail('No rough total budget was returned.', 'Check the budget field in the schema and prompt.');
 } catch (error) {
-  const message = error instanceof GeminiError ? error.message : String(error?.message || error);
+  const message = error instanceof CloudflareAIError ? error.message : String(error?.message || error);
   fail('The ideas request failed.', message);
 }
 
-console.log(failures ? `\n${failures} check(s) failed.\n` : '\nEverything works - the app should generate ideas with prices and stores.\n');
+if (failures) {
+  console.log(`\n${failures} check(s) failed.\n`);
+} else {
+  console.log('\nEverything works - the app should generate ideas with prices and stores.\n');
+}
+
 process.exit(failures ? 1 : 0);

@@ -1,50 +1,71 @@
-# Gemini ideas branch (tools, prices, stores and steps)
+# Ideas branch (tools, prices, stores and steps)
 
-This branch owns one piece of AI Renovator: asking Gemini for the **tools and resources**
-a renovation needs with **rough prices**, **where to buy them locally**, and the
-**possible steps** to do it. It also ships a deliberately simple throwaway frontend so the
-endpoint can be tested on its own.
+The folder and branch name are historical: generation now runs on **Cloudflare Workers AI**,
+not Gemini.
 
-Prices and store suggestions are rough Gemini planning estimates, not quotes or live local
-stock; the UI says so. It is self-contained: dependency-free Node, plain HTML/CSS/JS, no
-build step. Nothing here touches image generation or before/after comparison.
+This branch owns one piece of AI Renovator: asking an AI model for the **tools and resources**
+a renovation needs with **rough prices**, **where to buy them locally**, and the **possible
+steps** to do it. It also ships a deliberately simple throwaway frontend so the endpoint can be
+tested on its own.
+
+Prices and store suggestions are rough planning estimates, not quotes or live local stock; the
+UI says so. It is self-contained: dependency-free Node, plain HTML/CSS/JS, no build step.
+Nothing here touches image generation or before/after comparison.
 
 ## Run it
 
 ```bash
 cd gemini-ideas
-cp .env.example .env          # then put your GEMINI_API_KEY in .env
+cp .env.example .env          # then add your Cloudflare account ID and token
 npm start                     # or: node server.js
-npm run check                 # optional: verify key, model and a real request
+npm run check                 # optional: verify credentials and a real request
 ```
 
-Open <http://localhost:3000>. Port and model can be changed with `PORT` and `GEMINI_MODEL`.
+Open <http://localhost:3000>. Port and model can be changed with `PORT` and `CLOUDFLARE_AI_MODEL`.
 
-Never commit `gemini-ideas/.env`; the repo's `.gitignore` already excludes it.
+### Cloudflare credentials
+
+1. **Account ID** - Cloudflare dashboard -> Workers & Pages -> Account ID (right sidebar).
+2. **API token** - <https://dash.cloudflare.com/profile/api-tokens> -> Create Token. Use the
+   Workers AI template, or a custom token with **Workers AI: Read** for that account. Copy it
+   once; Cloudflare will not show it again.
+
+Both go in `gemini-ideas/.env`:
+
+```bash
+CLOUDFLARE_ACCOUNT_ID=...
+CLOUDFLARE_API_TOKEN=...
+```
+
+The server calls the Workers AI REST API at
+`POST /accounts/{account_id}/ai/run/{model}` with `Authorization: Bearer <token>` and asks for
+JSON Mode (`response_format` with a JSON Schema). Never commit `gemini-ideas/.env`; the repo's
+`.gitignore` already excludes it.
 
 ## Troubleshooting
 
 `npm run check` is the fastest way to find the problem. It reports:
 
-1. whether `.env` was found and `GEMINI_API_KEY` is set (it never prints the key),
-2. whether Google accepts the key, and which models it can see,
-3. whether the configured model is available to that key,
-4. a real `generateIdeas()` round trip and what came back, including that prices, a budget
-   and local stores are present.
+1. whether `.env` was found and both credentials are set (it never prints the token),
+2. whether Cloudflare accepts the token, and whether Workers AI is reachable for that account,
+3. a real `generateIdeas()` round trip and what came back, including that prices, a budget and
+   local stores are present.
 
 Common causes:
 
-- **"GEMINI_API_KEY is not set on this server"** - the `.env` file must be next to
-  `server.js` (`gemini-ideas/.env`), not in the repo root, and the server must be
-  restarted after adding it. The page now shows a banner when the key is missing.
-  Project secrets injected into the environment also work and take precedence.
-- **`API key not valid`** - the key was copied incompletely or deleted; create a new one
-  at <https://aistudio.google.com/apikey>.
-- **`model ... is not found`** - that model is not available to your key. `npm run check`
-  lists text models the key can see; set `GEMINI_MODEL=<name>` in `.env`.
-- **A cloud preview still shows the missing-key banner** - the preview runs on the
-  workspace machine, so the key must be set there too (as a project secret or in that
-  machine's `gemini-ideas/.env`), not only on your laptop.
+- **"CLOUDFLARE_ACCOUNT_ID is not set"** - the `.env` file must sit next to `server.js`
+  (`gemini-ideas/.env`), not in the repo root, and the server must be restarted after editing
+  it. The page shows a banner when credentials are missing.
+- **`Authentication error` / HTTP 403** - the token lacks Workers AI permission for that
+  account, or the account ID belongs to a different account. Create a token from the Workers AI
+  template and recheck the ID.
+- **`model ... not found`** - that model is not available to your account. Set
+  `CLOUDFLARE_AI_MODEL=@cf/...` in `.env`; the model catalog is at
+  <https://developers.cloudflare.com/workers-ai/models/>.
+- **`JSON Mode couldn't be met`** - the model could not satisfy the schema on that attempt.
+  Re-run; the app also retries on the fallback model.
+- **A cloud preview still shows the missing-credentials banner** - the preview runs on the
+  workspace machine, so the credentials must be set there too, not only on your laptop.
 
 ## API
 
@@ -86,30 +107,32 @@ Response:
     { "order": 1, "title": "string", "detail": "string", "estimatedTime": "half a day", "needs": ["tile breaker"] }
   ],
   "tips": ["string"],
-  "model": "gemini-3.8-flash"
+  "model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 }
 ```
 
-Prices are rough strings from Gemini in the local currency, not calculated totals. Store
+Prices are rough strings from the model in the local currency, not calculated totals. Store
 names are chains that commonly serve that region, or store types when no specific shop is
 known; addresses and stock are never invented.
 
-`GET /api/health` reports the configured model, its fallbacks and whether `GEMINI_API_KEY` is present.
+`GET /api/health` reports the model, its fallbacks, and whether the account ID and token are
+present.
 
 The response's `model` field reports which model actually answered. If the primary model
-(`GEMINI_MODEL`, default `gemini-3.8-flash`) is overloaded or unavailable (404/429/5xx or a
-timeout), the app retries automatically with `gemini-3.6-flash` and then
-`gemini-3.5-flash-lite`, in that order.
+(`CLOUDFLARE_AI_MODEL`, default `@cf/meta/llama-3.3-70b-instruct-fp8-fast`) is unavailable
+(404/429/5xx, timeout or a JSON Mode failure), the app retries with
+`@cf/meta/llama-3.1-8b-instruct-fast`.
 
 ## Files
 
 - `server.js` - HTTP server, `POST /api/ideas`, `GET /api/health`, static `public/`
-- `lib/gemini.js` - prompt, response schema, Gemini call, response normalisation
+- `lib/cloudflare-ai.js` - prompt, JSON Schema, Workers AI call, response normalisation
 - `lib/env.js` - minimal `.env` loader (no dependency)
 - `check.mjs` - diagnostic script (`npm run check`)
 - `public/` - the temporary test UI
 
 ## Integrating later
 
-The frontend is temporary. The reusable part is `generateIdeas(input)` in `lib/gemini.js`;
-call it from the main app's route and drop `public/`, `server.js` and `check.mjs`.
+The frontend is temporary. The reusable part is `generateIdeas(input)` in
+`lib/cloudflare-ai.js`; call it from the main app's route and drop `public/`, `server.js` and
+`check.mjs`.

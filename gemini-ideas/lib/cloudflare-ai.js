@@ -1,12 +1,12 @@
-const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+const API_BASE = 'https://api.cloudflare.com/client/v4/accounts';
 
-const PRIMARY_MODEL = 'gemini-3.8-flash';
-const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite'];
+const PRIMARY_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+const FALLBACK_MODELS = ['@cf/meta/llama-3.1-8b-instruct-fast'];
 const RETRYABLE_STATUSES = new Set([404, 429, 500, 502, 503, 504]);
 
 // Read env lazily: the server loads .env after this module is imported.
 function primaryModel() {
-  return process.env.GEMINI_MODEL || PRIMARY_MODEL;
+  return process.env.CLOUDFLARE_AI_MODEL || PRIMARY_MODEL;
 }
 
 export function getModelName() {
@@ -31,74 +31,73 @@ Rules:
 - Name the professional help or permits explicitly when the work legally or practically needs them, and give their rough cost or callout fee.
 - Every tool/resource needs a rough price range in the currency used where the user is located; use USD only when the location is unknown or ambiguous. Use rent pricing where renting is the normal choice. These are planning estimates, not quotes.
 - Suggest stores that realistically serve that location: prefer chains that operate in that country or region and, where you do not know specific shops, describe the store type (e.g. "independent tile shop") instead of inventing names or addresses.
+- Every tool/resource must list at least one store in whereToBuy, using names from the stores list or the same store type.
 - Never invent exact prices, stock levels, addresses, phone numbers or links. Write "varies" or "check locally" when unsure.
 - Steps must be ordered, start with preparation/protection and end with cleanup or finishing.
 - Each step should say what "done" looks like in one or two sentences, and which tools it needs.
 - estimatedTime is a rough human effort such as "half a day" or "2-3 hours"; if unsure use a range.
-- Be concise and concrete. No filler, no marketing language.`;
+- Be concise and concrete. No filler, no marketing language.
+- Reply with JSON that matches the response schema.`;
 
 const RESPONSE_SCHEMA = {
-  type: 'OBJECT',
-  propertyOrdering: ['summary', 'budget', 'toolsAndResources', 'stores', 'steps', 'tips'],
+  type: 'object',
   properties: {
     summary: {
-      type: 'STRING',
+      type: 'string',
       description: 'One or two sentences on what the renovation involves and its main risk.',
     },
     budget: {
-      type: 'STRING',
+      type: 'string',
       description:
         'Rough total budget range for all listed tools, materials and services, in local currency, e.g. "EUR 300-550".',
     },
     toolsAndResources: {
-      type: 'ARRAY',
+      type: 'array',
       description: 'Everything the user needs to have or hire before and during the work.',
       items: {
-        type: 'OBJECT',
-        propertyOrdering: ['name', 'category', 'whyNeeded', 'whoDoesIt', 'estimatedPrice', 'whereToBuy'],
+        type: 'object',
         properties: {
-          name: { type: 'STRING' },
+          name: { type: 'string' },
           category: {
-            type: 'STRING',
+            type: 'string',
             enum: ['tool', 'material', 'consumable', 'safety', 'service', 'permit'],
           },
-          whyNeeded: { type: 'STRING' },
+          whyNeeded: { type: 'string' },
           whoDoesIt: {
-            type: 'STRING',
+            type: 'string',
             enum: ['diy', 'professional', 'either'],
             description: 'Whether the user can do this themselves or should hire someone.',
           },
           estimatedPrice: {
-            type: 'STRING',
+            type: 'string',
             description:
               'Rough price or range in local currency, e.g. "EUR 20-35", "rent EUR 45/day", "callout EUR 80-120".',
           },
           whereToBuy: {
-            type: 'ARRAY',
-            items: { type: 'STRING' },
-            description: 'Short store names from the stores list that sell or rent this item.',
+            type: 'array',
+            items: { type: 'string' },
+            description: 'At least one short store name from the stores list that sells or rents this item.',
           },
         },
-        required: ['name', 'category', 'whyNeeded', 'estimatedPrice'],
+        required: ['name', 'category', 'whyNeeded', 'estimatedPrice', 'whereToBuy'],
       },
     },
     stores: {
-      type: 'ARRAY',
+      type: 'array',
       description: 'Realistic places to buy or rent the tools and materials near the stated location.',
       items: {
-        type: 'OBJECT',
-        propertyOrdering: ['name', 'type', 'bestFor'],
+        type: 'object',
         properties: {
           name: {
-            type: 'STRING',
+            type: 'string',
             description: 'Chain name, or a store type when no specific chain is known.',
           },
           type: {
-            type: 'STRING',
+            type: 'string',
             description: 'e.g. big-box hardware, tile specialist, tool rental, online.',
           },
           bestFor: {
-            type: 'STRING',
+            type: 'string',
             description: 'Which items from this plan to get there.',
           },
         },
@@ -106,19 +105,18 @@ const RESPONSE_SCHEMA = {
       },
     },
     steps: {
-      type: 'ARRAY',
+      type: 'array',
       description: 'Ordered renovation steps.',
       items: {
-        type: 'OBJECT',
-        propertyOrdering: ['order', 'title', 'detail', 'estimatedTime', 'needs'],
+        type: 'object',
         properties: {
-          order: { type: 'INTEGER' },
-          title: { type: 'STRING' },
-          detail: { type: 'STRING' },
-          estimatedTime: { type: 'STRING' },
+          order: { type: 'integer' },
+          title: { type: 'string' },
+          detail: { type: 'string' },
+          estimatedTime: { type: 'string' },
           needs: {
-            type: 'ARRAY',
-            items: { type: 'STRING' },
+            type: 'array',
+            items: { type: 'string' },
             description: 'Names of tools/resources from this answer that this step needs.',
           },
         },
@@ -126,18 +124,18 @@ const RESPONSE_SCHEMA = {
       },
     },
     tips: {
-      type: 'ARRAY',
-      items: { type: 'STRING' },
+      type: 'array',
+      items: { type: 'string' },
       description: 'Up to three short practical warnings specific to this job.',
     },
   },
   required: ['summary', 'budget', 'toolsAndResources', 'stores', 'steps'],
 };
 
-export class GeminiError extends Error {
+export class CloudflareAIError extends Error {
   constructor(message, status = 502) {
     super(message);
-    this.name = 'GeminiError';
+    this.name = 'CloudflareAIError';
     this.status = status;
   }
 }
@@ -161,19 +159,23 @@ function buildPrompt({ description, roomType, constraints, location }) {
   return lines.join('\n');
 }
 
-function parseJson(text, model) {
-  if (!text) {
-    throw new GeminiError('Gemini returned an empty response.');
+function parseJson(raw, model) {
+  if (raw && typeof raw === 'object') {
+    return normalizeIdeas(raw, model);
+  }
+
+  if (typeof raw !== 'string' || !raw.trim()) {
+    throw new CloudflareAIError('Cloudflare AI returned an empty response.');
   }
 
   // The API is asked for JSON, but strip a stray code fence if the model adds one.
-  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/, '').trim();
+  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/, '').trim();
 
   let parsed;
   try {
     parsed = JSON.parse(cleaned);
   } catch {
-    throw new GeminiError('Gemini returned a response that was not valid JSON.');
+    throw new CloudflareAIError('Cloudflare AI returned a response that was not valid JSON.');
   }
 
   return normalizeIdeas(parsed, model);
@@ -226,7 +228,7 @@ function normalizeIdeas(raw, model) {
     : [];
 
   if (!summary && !toolsAndResources.length && !steps.length) {
-    throw new GeminiError('Gemini returned no usable renovation ideas.');
+    throw new CloudflareAIError('Cloudflare AI returned no usable renovation ideas.');
   }
 
   const tips = Array.isArray(raw.tips)
@@ -236,8 +238,8 @@ function normalizeIdeas(raw, model) {
   return { summary, budget, toolsAndResources, stores, steps, tips, model };
 }
 
-async function requestModel(model, input, apiKey) {
-  const url = `${API_BASE}/${encodeURIComponent(model)}:generateContent`;
+async function requestModel(model, input, accountId, apiToken) {
+  const url = `${API_BASE}/${accountId}/ai/run/${model}`;
 
   let response;
   try {
@@ -245,58 +247,60 @@ async function requestModel(model, input, apiKey) {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-goog-api-key': apiKey,
+        authorization: `Bearer ${apiToken}`,
       },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        contents: [{ role: 'user', parts: [{ text: buildPrompt(input) }] }],
-        generationConfig: {
-          temperature: 0.9,
-          responseMimeType: 'application/json',
-          responseSchema: RESPONSE_SCHEMA,
-        },
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: buildPrompt(input) },
+        ],
+        response_format: { type: 'json_schema', json_schema: RESPONSE_SCHEMA },
+        max_tokens: 4096,
+        temperature: 0.7,
       }),
-      signal: AbortSignal.timeout(45_000),
+      signal: AbortSignal.timeout(60_000),
     });
   } catch (error) {
-    const reason = error?.name === 'TimeoutError' ? 'Gemini took too long to respond.' : 'Could not reach Gemini.';
-    throw new GeminiError(reason);
+    const reason =
+      error?.name === 'TimeoutError' ? 'Cloudflare AI took too long to respond.' : 'Could not reach Cloudflare AI.';
+    throw new CloudflareAIError(reason);
   }
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    let detail = body.slice(0, 300);
-    try {
-      detail = JSON.parse(body)?.error?.message ?? detail;
-    } catch {
-      // keep the raw text
-    }
-    throw new GeminiError(
-      `Gemini API error (${response.status}): ${detail || 'no details returned'}`,
-      response.status,
-    );
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
   }
 
-  const data = await response.json();
-  const candidate = data?.candidates?.[0];
-
-  if (!candidate || candidate.finishReason === 'SAFETY' || candidate.finishReason === 'PROHIBITED_CONTENT') {
-    throw new GeminiError('Gemini declined to answer this request.', 422);
+  if (!response.ok || data?.success === false) {
+    const detail =
+      (data?.errors || [])
+        .map((entry) => entry?.message)
+        .filter(Boolean)
+        .join('; ') || `HTTP ${response.status}`;
+    throw new CloudflareAIError(`Cloudflare AI error (${response.status}): ${detail}`, response.status);
   }
 
-  const text = (candidate.content?.parts || [])
-    .map((part) => (typeof part.text === 'string' ? part.text : ''))
-    .join('');
-
-  return parseJson(text, model);
+  const result = data?.result ?? data;
+  const raw = result?.response ?? result;
+  return parseJson(raw, model);
 }
 
 export async function generateIdeas(input) {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
 
-  if (!apiKey) {
-    throw new GeminiError(
-      'GEMINI_API_KEY is not set on this server. Add it to gemini-ideas/.env next to server.js and restart the server, then check /api/health.',
+  if (!accountId) {
+    throw new CloudflareAIError(
+      'CLOUDFLARE_ACCOUNT_ID is not set on this server. Add it to gemini-ideas/.env next to server.js and restart the server, then check /api/health.',
+      500,
+    );
+  }
+
+  if (!apiToken) {
+    throw new CloudflareAIError(
+      'CLOUDFLARE_API_TOKEN is not set on this server. Add it to gemini-ideas/.env next to server.js and restart the server, then check /api/health.',
       500,
     );
   }
@@ -307,17 +311,19 @@ export async function generateIdeas(input) {
     const model = models[index];
 
     try {
-      return await requestModel(model, input, apiKey);
+      return await requestModel(model, input, accountId, apiToken);
     } catch (error) {
       const nextModel = models[index + 1];
-      const retryable = error instanceof GeminiError && RETRYABLE_STATUSES.has(error.status);
+      const retryable =
+        error instanceof CloudflareAIError &&
+        (RETRYABLE_STATUSES.has(error.status) || /JSON Mode/i.test(error.message));
 
       if (!retryable || !nextModel) throw error;
 
-      console.warn(`[gemini] ${model} unavailable (${error.message}); retrying with ${nextModel}`);
+      console.warn(`[cloudflare-ai] ${model} unusable (${error.message}); retrying with ${nextModel}`);
     }
   }
 
   // The loop always returns or throws.
-  throw new GeminiError('Gemini could not answer with any configured model.');
+  throw new CloudflareAIError('Cloudflare AI could not answer with any configured model.');
 }
