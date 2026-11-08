@@ -215,3 +215,7 @@ Test-use only; these are not shipped with the app.
 - **No auth or rate limiting** on the APIs themselves; put them behind a shared secret or
   the GUI proxy before exposing them publicly.
 - **`ALLOWED_ORIGINS=*`** is for local development; tighten it for a public deployment.
+
+## Ai Disclosure
+
+AI Agents: FreeBuff and Lovable were used in the creation of this project
