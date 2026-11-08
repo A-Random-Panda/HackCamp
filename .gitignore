@@ -6,6 +6,12 @@
 # Node dependencies
 node_modules/
 
+# GUI build output
+.output/
+.nitro/
+.wrangler/
+.tanstack/
+
 # Logs
 *.log
 

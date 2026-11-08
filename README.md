@@ -21,6 +21,21 @@ They share the same Cloudflare Workers AI account but read separate env files: r
 for the image API and `gemini-ideas/.env` for the ideas app. Setup for the ideas side is in
 [`gemini-ideas/README.md`](gemini-ideas/README.md).
 
+## Primary interface
+
+The React GUI at the repo root is the product interface. It calls the ideas API for the plan
+and the image API for the finished photo; its server functions proxy both.
+
+```bash
+bun install
+bun run dev       # http://localhost:5173
+bun run build
+```
+
+Start the ideas API (port 3000) and the image API (port 8000) first. Override the proxy targets
+with `IDEAS_API_URL` and `IMAGE_API_URL` if they run elsewhere. `gemini-ideas/public/` and
+`temp_test_ui/` are temporary test harnesses, not the product UI.
+
 ---
 
 ## Status: working, on the free tier
