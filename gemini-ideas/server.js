@@ -62,8 +62,9 @@ function validateInput(body) {
 
   const roomType = typeof body.roomType === 'string' ? body.roomType.trim().slice(0, 60) : '';
   const constraints = typeof body.constraints === 'string' ? body.constraints.trim().slice(0, 500) : '';
+  const location = typeof body.location === 'string' ? body.location.trim().slice(0, 120) : '';
 
-  return { description, roomType, constraints };
+  return { description, roomType, constraints, location };
 }
 
 async function serveStatic(pathname, res) {

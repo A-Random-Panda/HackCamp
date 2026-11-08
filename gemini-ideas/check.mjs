@@ -98,19 +98,31 @@ try {
   const ideas = await generateIdeas({
     description: 'Small bathroom, replace the old wall tiles and swap the vanity for a compact sink unit.',
     roomType: 'Bathroom',
+    location: 'Manchester, UK',
     constraints: 'Renting, one weekend, no experience.',
   });
 
   pass(`Gemini returned a response the app could parse (answered by ${ideas.model})`);
   info(`Summary: ${ideas.summary || '(empty)'}`);
+  info(`Rough budget: ${ideas.budget || '(empty)'}`);
   info(`Tools/resources: ${ideas.toolsAndResources.length}`);
   info(`Steps: ${ideas.steps.length}`);
+  info(`Stores: ${ideas.stores.length}`);
   if (ideas.steps[0]) info(`First step: ${ideas.steps[0].order}. ${ideas.steps[0].title}`);
-  if (ideas.toolsAndResources[0]) info(`First tool: ${ideas.toolsAndResources[0].name}`);
+  if (ideas.toolsAndResources[0]) {
+    const first = ideas.toolsAndResources[0];
+    info(`First tool: ${first.name} | price: ${first.estimatedPrice || '(missing)'} | buy at: ${first.whereToBuy?.join(', ') || '(missing)'}`);
+  }
+  if (ideas.stores[0]) info(`First store: ${ideas.stores[0].name} (${ideas.stores[0].type})`);
+
+  const priced = ideas.toolsAndResources.filter((tool) => tool.estimatedPrice).length;
+  if (!priced) fail('No tool/resource has a price.', 'Check estimatedPrice in the schema and prompt.');
+  if (!ideas.stores.length) fail('No local stores were returned.', 'Check the stores field in the schema and prompt.');
+  if (!ideas.budget) fail('No rough total budget was returned.', 'Check the budget field in the schema and prompt.');
 } catch (error) {
   const message = error instanceof GeminiError ? error.message : String(error?.message || error);
   fail('The ideas request failed.', message);
 }
 
-console.log(failures ? `\n${failures} check(s) failed.\n` : '\nEverything works - the app should generate ideas.\n');
+console.log(failures ? `\n${failures} check(s) failed.\n` : '\nEverything works - the app should generate ideas with prices and stores.\n');
 process.exit(failures ? 1 : 0);

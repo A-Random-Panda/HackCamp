@@ -4,7 +4,10 @@ const serverNotice = document.querySelector('#server-notice');
 const statusEl = document.querySelector('#status');
 const resultsEl = document.querySelector('#results');
 const summaryEl = document.querySelector('#summary');
+const budgetEl = document.querySelector('#budget');
 const toolsEl = document.querySelector('#tools');
+const storesEl = document.querySelector('#stores');
+const storesCard = document.querySelector('#stores-card');
 const stepsEl = document.querySelector('#steps');
 const tipsEl = document.querySelector('#tips');
 const tipsCard = document.querySelector('#tips-card');
@@ -26,7 +29,11 @@ function setStatus(message, kind = 'info') {
 
 function clearResults() {
   resultsEl.hidden = true;
+  budgetEl.hidden = true;
+  budgetEl.textContent = '';
   toolsEl.replaceChildren();
+  storesEl.replaceChildren();
+  storesCard.hidden = true;
   stepsEl.replaceChildren();
   tipsEl.replaceChildren();
   tipsCard.hidden = true;
@@ -46,9 +53,11 @@ function renderTools(tools) {
     const head = el('div', 'tool-head');
     head.append(el('strong', '', tool.name));
     head.append(el('span', `tag tag-${tool.category}`, CATEGORY_LABELS[tool.category] || tool.category));
+    if (tool.estimatedPrice) head.append(el('span', 'tag tag-price', tool.estimatedPrice));
     item.append(head);
 
     if (tool.whyNeeded) item.append(el('p', 'why', tool.whyNeeded));
+    if (tool.whereToBuy?.length) item.append(el('p', 'buy', `Buy at: ${tool.whereToBuy.join(', ')}`));
     if (tool.whoDoesIt && tool.whoDoesIt !== 'either') {
       item.append(el('span', `tag tag-${tool.whoDoesIt}`, tool.whoDoesIt === 'diy' ? 'DIY' : 'Hire a pro'));
     }
@@ -57,6 +66,22 @@ function renderTools(tools) {
   }
 
   if (!tools.length) toolsEl.append(el('li', 'why', 'Gemini listed no tools for this job.'));
+}
+
+function renderStores(stores) {
+  for (const store of stores) {
+    const item = el('li', 'store');
+
+    const head = el('div', 'store-head');
+    head.append(el('strong', '', store.name));
+    if (store.type) head.append(el('span', 'tag', store.type));
+    item.append(head);
+
+    if (store.bestFor) item.append(el('p', 'why', `Best for: ${store.bestFor}`));
+    storesEl.append(item);
+  }
+
+  storesCard.hidden = stores.length === 0;
 }
 
 function renderSteps(steps) {
@@ -78,7 +103,16 @@ function renderSteps(steps) {
 
 function render(ideas) {
   summaryEl.textContent = ideas.summary;
+
+  if (ideas.budget) {
+    budgetEl.textContent = `Rough budget: ${ideas.budget}`;
+    budgetEl.hidden = false;
+  } else {
+    budgetEl.hidden = true;
+  }
+
   renderTools(ideas.toolsAndResources || []);
+  renderStores(ideas.stores || []);
   renderSteps(ideas.steps || []);
 
   if (ideas.tips?.length) {
@@ -101,7 +135,7 @@ form.addEventListener('submit', async (event) => {
   submitButton.disabled = true;
   submitButton.textContent = 'Thinking...';
   clearResults();
-  setStatus('Asking Gemini for tools and steps...');
+  setStatus('Asking Gemini for tools, prices, shops and steps...');
 
   try {
     const response = await fetch('/api/ideas', {
@@ -110,6 +144,7 @@ form.addEventListener('submit', async (event) => {
       body: JSON.stringify({
         description,
         roomType: form.roomType.value,
+        location: form.location.value.trim(),
         constraints: form.constraints.value.trim(),
       }),
     });
@@ -126,7 +161,9 @@ form.addEventListener('submit', async (event) => {
     setStatus(error.message || 'Something went wrong.', 'error');
   } finally {
     submitButton.disabled = false;
-    submitButton.textContent = resultsEl.hidden ? 'Generate tools & steps' : 'Regenerate tools & steps';
+    submitButton.textContent = resultsEl.hidden
+      ? 'Generate tools, prices & steps'
+      : 'Regenerate tools, prices & steps';
   }
 });
 

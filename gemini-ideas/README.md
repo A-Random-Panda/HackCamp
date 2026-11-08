@@ -1,11 +1,13 @@
-# Gemini ideas branch (tools, resources and steps)
+# Gemini ideas branch (tools, prices, stores and steps)
 
 This branch owns one piece of AI Renovator: asking Gemini for the **tools and resources**
-a renovation needs and the **possible steps** to do it. It also ships a deliberately simple
-throwaway frontend so the endpoint can be tested on its own.
+a renovation needs with **rough prices**, **where to buy them locally**, and the
+**possible steps** to do it. It also ships a deliberately simple throwaway frontend so the
+endpoint can be tested on its own.
 
-It is self-contained: dependency-free Node, plain HTML/CSS/JS, no build step. Nothing here
-touches image generation, before/after comparison or price ranges.
+Prices and store suggestions are rough Gemini planning estimates, not quotes or live local
+stock; the UI says so. It is self-contained: dependency-free Node, plain HTML/CSS/JS, no
+build step. Nothing here touches image generation or before/after comparison.
 
 ## Run it
 
@@ -27,7 +29,8 @@ Never commit `gemini-ideas/.env`; the repo's `.gitignore` already excludes it.
 1. whether `.env` was found and `GEMINI_API_KEY` is set (it never prints the key),
 2. whether Google accepts the key, and which models it can see,
 3. whether the configured model is available to that key,
-4. a real `generateIdeas()` round trip and what came back.
+4. a real `generateIdeas()` round trip and what came back, including that prices, a budget
+   and local stores are present.
 
 Common causes:
 
@@ -51,18 +54,33 @@ Common causes:
 {
   "description": "Small 1990s bathroom, rip out tiles and vanity, walk-in shower",
   "roomType": "Bathroom",
+  "location": "Manchester, UK",
   "constraints": "renting, one weekend, no experience"
 }
 ```
 
-`description` (10-2000 chars) is required; `roomType` and `constraints` are optional.
+`description` (10-2000 chars) is required; `roomType`, `location` and `constraints` are
+optional. `location` picks the currency and the store suggestions, so plans without it fall
+back to USD and generic store types.
+
 Response:
 
 ```json
 {
   "summary": "string",
+  "budget": "GBP 250-450 (rough)",
   "toolsAndResources": [
-    { "name": "tile breaker", "category": "tool", "whyNeeded": "string", "whoDoesIt": "diy|professional|either" }
+    {
+      "name": "tile breaker",
+      "category": "tool",
+      "whyNeeded": "string",
+      "whoDoesIt": "diy|professional|either",
+      "estimatedPrice": "GBP 25-45 or rent GBP 15/day",
+      "whereToBuy": ["Screwfix", "Toolstation"]
+    }
+  ],
+  "stores": [
+    { "name": "Screwfix", "type": "big-box hardware", "bestFor": "tiling tools and safety gear" }
   ],
   "steps": [
     { "order": 1, "title": "string", "detail": "string", "estimatedTime": "half a day", "needs": ["tile breaker"] }
@@ -71,6 +89,10 @@ Response:
   "model": "gemini-3.8-flash"
 }
 ```
+
+Prices are rough strings from Gemini in the local currency, not calculated totals. Store
+names are chains that commonly serve that region, or store types when no specific shop is
+known; addresses and stock are never invented.
 
 `GET /api/health` reports the configured model, its fallbacks and whether `GEMINI_API_KEY` is present.
 

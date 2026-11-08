@@ -18,36 +18,44 @@ export function getModelCandidates() {
 }
 
 const SYSTEM_PROMPT = `You are a practical renovation planner.
-You are given a description of a space the user wants to renovate.
-Your job is limited to two things:
-1. The tools and resources needed for the renovation.
+You are given a description of a space the user wants to renovate and, optionally, their location.
+Your job is limited to three things:
+1. The tools and resources needed for the renovation, each with a rough price.
 2. The possible steps of the renovation, in a sensible order.
+3. Where to buy those tools and materials near the user's location.
 
 Rules:
 - Base your answer on the user's description; do not invent a different room or a different scope.
 - Keep scope realistic for a hands-on renovation, not a full rebuild.
 - List only tools/resources that the described work actually needs. Group reusable things (e.g. "cordless drill") and consumables (e.g. "painter's tape") separately via the category field.
-- Name the professional help or permits explicitly when the work legally or practically needs them.
+- Name the professional help or permits explicitly when the work legally or practically needs them, and give their rough cost or callout fee.
+- Every tool/resource needs a rough price range in the currency used where the user is located; use USD only when the location is unknown or ambiguous. Use rent pricing where renting is the normal choice. These are planning estimates, not quotes.
+- Suggest stores that realistically serve that location: prefer chains that operate in that country or region and, where you do not know specific shops, describe the store type (e.g. "independent tile shop") instead of inventing names or addresses.
+- Never invent exact prices, stock levels, addresses, phone numbers or links. Write "varies" or "check locally" when unsure.
 - Steps must be ordered, start with preparation/protection and end with cleanup or finishing.
 - Each step should say what "done" looks like in one or two sentences, and which tools it needs.
 - estimatedTime is a rough human effort such as "half a day" or "2-3 hours"; if unsure use a range.
-- Do not give price ranges, shop recommendations or shopping links; another part of the app handles pricing.
 - Be concise and concrete. No filler, no marketing language.`;
 
 const RESPONSE_SCHEMA = {
   type: 'OBJECT',
-  propertyOrdering: ['summary', 'toolsAndResources', 'steps', 'tips'],
+  propertyOrdering: ['summary', 'budget', 'toolsAndResources', 'stores', 'steps', 'tips'],
   properties: {
     summary: {
       type: 'STRING',
       description: 'One or two sentences on what the renovation involves and its main risk.',
+    },
+    budget: {
+      type: 'STRING',
+      description:
+        'Rough total budget range for all listed tools, materials and services, in local currency, e.g. "EUR 300-550".',
     },
     toolsAndResources: {
       type: 'ARRAY',
       description: 'Everything the user needs to have or hire before and during the work.',
       items: {
         type: 'OBJECT',
-        propertyOrdering: ['name', 'category', 'whyNeeded', 'whoDoesIt'],
+        propertyOrdering: ['name', 'category', 'whyNeeded', 'whoDoesIt', 'estimatedPrice', 'whereToBuy'],
         properties: {
           name: { type: 'STRING' },
           category: {
@@ -60,8 +68,41 @@ const RESPONSE_SCHEMA = {
             enum: ['diy', 'professional', 'either'],
             description: 'Whether the user can do this themselves or should hire someone.',
           },
+          estimatedPrice: {
+            type: 'STRING',
+            description:
+              'Rough price or range in local currency, e.g. "EUR 20-35", "rent EUR 45/day", "callout EUR 80-120".',
+          },
+          whereToBuy: {
+            type: 'ARRAY',
+            items: { type: 'STRING' },
+            description: 'Short store names from the stores list that sell or rent this item.',
+          },
         },
-        required: ['name', 'category', 'whyNeeded'],
+        required: ['name', 'category', 'whyNeeded', 'estimatedPrice'],
+      },
+    },
+    stores: {
+      type: 'ARRAY',
+      description: 'Realistic places to buy or rent the tools and materials near the stated location.',
+      items: {
+        type: 'OBJECT',
+        propertyOrdering: ['name', 'type', 'bestFor'],
+        properties: {
+          name: {
+            type: 'STRING',
+            description: 'Chain name, or a store type when no specific chain is known.',
+          },
+          type: {
+            type: 'STRING',
+            description: 'e.g. big-box hardware, tile specialist, tool rental, online.',
+          },
+          bestFor: {
+            type: 'STRING',
+            description: 'Which items from this plan to get there.',
+          },
+        },
+        required: ['name', 'type', 'bestFor'],
       },
     },
     steps: {
@@ -90,7 +131,7 @@ const RESPONSE_SCHEMA = {
       description: 'Up to three short practical warnings specific to this job.',
     },
   },
-  required: ['summary', 'toolsAndResources', 'steps'],
+  required: ['summary', 'budget', 'toolsAndResources', 'stores', 'steps'],
 };
 
 export class GeminiError extends Error {
@@ -101,8 +142,12 @@ export class GeminiError extends Error {
   }
 }
 
-function buildPrompt({ description, roomType, constraints }) {
+function buildPrompt({ description, roomType, constraints, location }) {
   const lines = ['Space:', roomType ? roomType : 'not specified', '', 'Renovation description:', description];
+
+  if (location) {
+    lines.push('', 'Location (for store suggestions and currency):', location);
+  }
 
   if (constraints) {
     lines.push('', 'Constraints from the user:', constraints);
@@ -110,7 +155,7 @@ function buildPrompt({ description, roomType, constraints }) {
 
   lines.push(
     '',
-    'Return the tools/resources needed and the ordered steps. Follow the response schema.',
+    'Return the tools/resources with rough prices, the ordered steps, a rough total budget and local stores. Follow the response schema.',
   );
 
   return lines.join('\n');
@@ -145,6 +190,22 @@ function normalizeIdeas(raw, model) {
           category: typeof item.category === 'string' ? item.category.trim().toLowerCase() : 'tool',
           whyNeeded: typeof item.whyNeeded === 'string' ? item.whyNeeded.trim() : '',
           whoDoesIt: typeof item.whoDoesIt === 'string' ? item.whoDoesIt.trim().toLowerCase() : 'either',
+          estimatedPrice: typeof item.estimatedPrice === 'string' ? item.estimatedPrice.trim() : '',
+          whereToBuy: Array.isArray(item.whereToBuy)
+            ? item.whereToBuy.filter((store) => typeof store === 'string' && store.trim()).map((store) => store.trim())
+            : [],
+        }))
+    : [];
+
+  const budget = typeof raw.budget === 'string' ? raw.budget.trim() : '';
+
+  const stores = Array.isArray(raw.stores)
+    ? raw.stores
+        .filter((store) => store && typeof store.name === 'string' && store.name.trim())
+        .map((store) => ({
+          name: store.name.trim(),
+          type: typeof store.type === 'string' ? store.type.trim() : '',
+          bestFor: typeof store.bestFor === 'string' ? store.bestFor.trim() : '',
         }))
     : [];
 
@@ -172,7 +233,7 @@ function normalizeIdeas(raw, model) {
     ? raw.tips.filter((tip) => typeof tip === 'string' && tip.trim()).map((tip) => tip.trim())
     : [];
 
-  return { summary, toolsAndResources, steps, tips, model };
+  return { summary, budget, toolsAndResources, stores, steps, tips, model };
 }
 
 async function requestModel(model, input, apiKey) {

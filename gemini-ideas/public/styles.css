@@ -265,11 +265,51 @@ li + li {
   margin-top: 8px;
 }
 
-#tips-card {
+#tips-card,
+#stores-card {
   margin-top: 16px;
 }
 
 #tips li {
   color: var(--muted);
   font-size: 14px;
+}
+
+.budget {
+  display: inline-block;
+  margin: 0 0 16px;
+  padding: 6px 12px;
+  border: 1px solid #c9e0d2;
+  border-radius: 999px;
+  background: #eef7f1;
+  color: #1f4d33;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tag-price {
+  color: #1f4d33;
+  border-color: #c9e0d2;
+  background: #eef7f1;
+}
+
+.buy {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.store-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.store .why {
+  margin: 4px 0 0;
+}
+
+.estimate-note {
+  margin: 14px 0 0;
 }
