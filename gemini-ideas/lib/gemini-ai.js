@@ -1,24 +1,28 @@
-const DEFAULT_API_BASE = 'https://ai.hackclub.com/proxy/v1';
+const DEFAULT_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
-const PRIMARY_MODEL = 'google/gemini-2.5-flash';
-const FALLBACK_MODELS = ['qwen/qwen3-32b'];
+const PRIMARY_MODEL = 'gemini-3.8-flash';
+const FALLBACK_MODELS = ['gemini-3.5-flash-lite'];
 const RETRYABLE_STATUSES = new Set([404, 429, 500, 502, 503, 504]);
 
 // Read env lazily: the server loads .env after this module is imported.
 export function getApiBase() {
-  return (process.env.HACKCLUB_AI_BASE_URL || DEFAULT_API_BASE).replace(/\/+$/, '');
+  return (process.env.GEMINI_API_BASE_URL || DEFAULT_API_BASE).replace(/\/+$/, '');
 }
 
 function apiKey() {
-  return process.env.HACKCLUB_AI_API_KEY || '';
+  return process.env.GEMINI_API_KEY || '';
+}
+
+function normalizeModelName(model) {
+  return String(model || '').trim().replace(/^models\//, '');
 }
 
 export function getModelName() {
-  return process.env.HACKCLUB_IDEAS_MODEL || PRIMARY_MODEL;
+  return normalizeModelName(process.env.GEMINI_TEXT_MODEL || PRIMARY_MODEL) || PRIMARY_MODEL;
 }
 
 export function getModelCandidates() {
-  return [...new Set([getModelName(), ...FALLBACK_MODELS])];
+  return [...new Set([getModelName(), ...FALLBACK_MODELS.map(normalizeModelName)])];
 }
 
 const SYSTEM_PROMPT = `You are a practical renovation planner.
@@ -136,10 +140,24 @@ const RESPONSE_SCHEMA = {
   required: ['summary', 'budget', 'toolsAndResources', 'stores', 'steps'],
 };
 
-export class HackClubAIError extends Error {
+// The REST responseSchema uses OpenAPI-style uppercase type names.
+function toGeminiSchema(value) {
+  if (Array.isArray(value)) return value.map(toGeminiSchema);
+  if (!value || typeof value !== 'object') return value;
+
+  const converted = {};
+  for (const [key, child] of Object.entries(value)) {
+    converted[key] = key === 'type' && typeof child === 'string' ? child.toUpperCase() : toGeminiSchema(child);
+  }
+  return converted;
+}
+
+const GEMINI_RESPONSE_SCHEMA = toGeminiSchema(RESPONSE_SCHEMA);
+
+export class GeminiAIError extends Error {
   constructor(message, status = 502) {
     super(message);
-    this.name = 'HackClubAIError';
+    this.name = 'GeminiAIError';
     this.status = status;
   }
 }
@@ -163,10 +181,6 @@ function buildPrompt({ description, roomType, constraints, location }) {
   return lines.join('\n');
 }
 
-function systemPrompt() {
-  return `${SYSTEM_PROMPT}\n\nResponse schema (JSON Schema):\n${JSON.stringify(RESPONSE_SCHEMA)}`;
-}
-
 function jsonObjectText(raw) {
   let text = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/, '').trim();
   if (text.startsWith('{')) return text;
@@ -184,7 +198,7 @@ function parseJson(raw, model) {
   }
 
   if (typeof raw !== 'string' || !raw.trim()) {
-    throw new HackClubAIError('Hack Club AI returned an empty response.');
+    throw new GeminiAIError('Gemini API returned an empty response.');
   }
 
   const cleaned = jsonObjectText(raw);
@@ -193,7 +207,7 @@ function parseJson(raw, model) {
   try {
     parsed = JSON.parse(cleaned);
   } catch {
-    throw new HackClubAIError('Hack Club AI returned a response that was not valid JSON.');
+    throw new GeminiAIError('Gemini API returned a response that was not valid JSON.');
   }
 
   return normalizeIdeas(parsed, model);
@@ -246,7 +260,7 @@ function normalizeIdeas(raw, model) {
     : [];
 
   if (!summary && !toolsAndResources.length && !steps.length) {
-    throw new HackClubAIError('Hack Club AI returned no usable renovation ideas.');
+    throw new GeminiAIError('Gemini API returned no usable renovation ideas.');
   }
 
   const tips = Array.isArray(raw.tips)
@@ -260,21 +274,22 @@ function errorDetail(data) {
   const error = data && data.error;
   if (typeof error === 'string') return error;
   if (error && typeof error === 'object') return error.message || error.code || JSON.stringify(error);
+  if (data?.promptFeedback?.blockReason) return `blocked (${data.promptFeedback.blockReason})`;
   return (data && data.message) || '';
 }
 
-function contentText(message) {
-  if (typeof message?.content === 'string') return message.content;
-  if (Array.isArray(message?.content)) {
-    return message.content
-      .map((part) => (typeof part === 'string' ? part : part?.text || ''))
-      .join('');
-  }
-  return '';
+function responseText(data) {
+  const parts = data?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return '';
+
+  return parts
+    .filter((part) => part && !part.thought && typeof part.text === 'string')
+    .map((part) => part.text)
+    .join('');
 }
 
 async function requestModel(model, input) {
-  const url = `${getApiBase()}/chat/completions`;
+  const url = `${getApiBase()}/models/${encodeURIComponent(normalizeModelName(model))}:generateContent`;
 
   let response;
   try {
@@ -282,24 +297,31 @@ async function requestModel(model, input) {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${apiKey()}`,
+        'x-goog-api-key': apiKey(),
       },
       body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt() },
-          { role: 'user', content: buildPrompt(input) },
+        systemInstruction: {
+          parts: [{ text: SYSTEM_PROMPT }],
+        },
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: buildPrompt(input) }],
+          },
         ],
-        max_tokens: 8192,
-        temperature: 0.2,
-        stream: false,
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 8192,
+          responseMimeType: 'application/json',
+          responseSchema: GEMINI_RESPONSE_SCHEMA,
+        },
       }),
       signal: AbortSignal.timeout(90_000),
     });
   } catch (error) {
     const reason =
-      error?.name === 'TimeoutError' ? 'Hack Club AI took too long to respond.' : 'Could not reach Hack Club AI.';
-    throw new HackClubAIError(reason);
+      error?.name === 'TimeoutError' ? 'Gemini API took too long to respond.' : 'Could not reach Gemini API.';
+    throw new GeminiAIError(reason);
   }
 
   let data = null;
@@ -311,12 +333,14 @@ async function requestModel(model, input) {
 
   if (!response.ok || data?.error) {
     const detail = errorDetail(data) || `HTTP ${response.status}`;
-    throw new HackClubAIError(`Hack Club AI error (${response.status}): ${detail}`, response.status);
+    throw new GeminiAIError(`Gemini API error (${response.status}): ${detail}`, response.status);
   }
 
-  const content = contentText(data?.choices?.[0]?.message);
+  const content = responseText(data);
   if (!content.trim()) {
-    throw new HackClubAIError('Hack Club AI returned an empty response.');
+    const finishReason = data?.candidates?.[0]?.finishReason;
+    const suffix = finishReason ? ` (finish reason: ${finishReason})` : '';
+    throw new GeminiAIError(`Gemini API returned an empty response${suffix}.`);
   }
 
   return parseJson(content, model);
@@ -324,8 +348,8 @@ async function requestModel(model, input) {
 
 export async function generateIdeas(input) {
   if (!apiKey()) {
-    throw new HackClubAIError(
-      'HACKCLUB_AI_API_KEY is not set on this server. Add it to gemini-ideas/.env next to server.js and restart the server, then check /api/health.',
+    throw new GeminiAIError(
+      'GEMINI_API_KEY is not set on this server. Add it to gemini-ideas/.env next to server.js and restart the server, then check /api/health.',
       500,
     );
   }
@@ -340,15 +364,15 @@ export async function generateIdeas(input) {
     } catch (error) {
       const nextModel = models[index + 1];
       const retryable =
-        error instanceof HackClubAIError &&
+        error instanceof GeminiAIError &&
         (RETRYABLE_STATUSES.has(error.status) || /JSON|no usable|empty response/i.test(error.message));
 
       if (!retryable || !nextModel) throw error;
 
-      console.warn(`[hackclub-ai] ${model} unusable (${error.message}); retrying with ${nextModel}`);
+      console.warn(`[gemini-ai] ${model} unusable (${error.message}); retrying with ${nextModel}`);
     }
   }
 
   // The loop always returns or throws.
-  throw new HackClubAIError('Hack Club AI could not answer with any configured model.');
+  throw new GeminiAIError('Gemini API could not answer with any configured model.');
 }

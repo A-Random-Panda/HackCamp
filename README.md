@@ -5,9 +5,10 @@ a priced materials/tools plan plus an edited photo of the same room.
 
 The repository contains two independent backends and the primary React GUI.
 
-**Current provider: [Hack Club AI](https://ai.hackclub.com).** The image service uses
-`google/gemini-nano-banana-2.1`; the ideas service uses `google/gemini-2.5-flash`.
-Both are configurable with environment variables.
+**Providers:** the image service uses [Hack Club AI](https://ai.hackclub.com) with
+`google/gemini-nano-banana-2.1`; the ideas service uses the
+[Google Gemini API](https://ai.google.dev) with `gemini-3.8-flash`. Both models are
+configurable with environment variables.
 
 ## Repository layout
 
@@ -17,8 +18,8 @@ Both are configurable with environment variables.
 | `gemini-ideas/` | Tools, rough prices, local stores and steps | dependency-free Node | <http://localhost:3000> |
 | `src/` | Primary Renovo GUI | React / TanStack Start | <http://localhost:5173> |
 
-The two backends read separate env files: root `.env` for the image API and
-`gemini-ideas/.env` for the ideas API. Both use the same Hack Club AI key.
+The two backends read separate env files: root `.env` for the Hack Club image API and
+`gemini-ideas/.env` for the Google Gemini ideas API.
 
 ## Quick start
 
@@ -51,7 +52,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1
 The launcher checks the prerequisites before starting and tells you the exact command to
 fix a missing `.venv`, missing `node_modules` or a port that is already taken. It never
 installs packages or edits env files; it only warns when `HACKCLUB_AI_API_KEY` is missing
-from `.env` or `gemini-ideas\.env`.
+from `.env` or `GEMINI_API_KEY` is missing from `gemini-ideas\.env`.
 
 ### Run the services yourself
 
@@ -74,7 +75,7 @@ Open <http://127.0.0.1:8000/test-ui> for the temporary manual test page.
 
 ```bash
 cd gemini-ideas
-cp .env.example .env               # add the same HACKCLUB_AI_API_KEY
+cp .env.example .env               # add GEMINI_API_KEY
 node server.js
 ```
 
@@ -92,10 +93,34 @@ The GUI calls its own TanStack server functions, which proxy to `IDEAS_API_URL` 
 `IMAGE_API_URL`. Start both backends first; the defaults are
 `http://127.0.0.1:3000` and `http://127.0.0.1:8000`.
 
-## Hack Club AI configuration
+## Provider configuration
 
-Create an API key at <https://ai.hackclub.com/dashboard>. Keep it server-side and add it
-to the env file for the service:
+### Ideas API - Google Gemini
+
+Create a Gemini API key at <https://aistudio.google.com/apikey>. Add it to
+`gemini-ideas/.env` (never commit it):
+
+```bash
+GEMINI_API_KEY=...
+```
+
+Optional overrides:
+
+```bash
+GEMINI_TEXT_MODEL=gemini-3.8-flash
+GEMINI_API_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+```
+
+The ideas service calls
+`POST {GEMINI_API_BASE_URL}/models/{model}:generateContent` with the `x-goog-api-key`
+header. It requests JSON with `responseMimeType: "application/json"` and a
+`responseSchema`, and asks the configured model for the plan. If the primary model is
+unavailable, it retries with `gemini-3.5-flash-lite`.
+
+### Image API - Hack Club AI
+
+Create a Hack Club API key at <https://ai.hackclub.com/dashboard>. Keep it server-side and
+add it to the root `.env`:
 
 ```bash
 HACKCLUB_AI_API_KEY=...
@@ -106,14 +131,12 @@ Optional overrides:
 ```bash
 HACKCLUB_AI_BASE_URL=https://ai.hackclub.com/proxy/v1
 HACKCLUB_IMAGE_MODEL=google/gemini-nano-banana-2.1
-HACKCLUB_IDEAS_MODEL=google/gemini-2.5-flash
 ```
 
-The APIs use the OpenAI-compatible endpoint
-`POST {HACKCLUB_AI_BASE_URL}/chat/completions` with a Bearer token. The image service
-sends a base64 data URL as an `image_url` content part and asks for
-`modalities: ["image", "text"]`; the result arrives as
-`choices[0].message.images[0].image_url.url`.
+The image service uses the OpenAI-compatible endpoint
+`POST {HACKCLUB_AI_BASE_URL}/chat/completions` with a Bearer token. It sends a base64 data
+URL as an `image_url` content part and asks for `modalities: ["image", "text"]`; the
+result arrives as `choices[0].message.images[0].image_url.url`.
 
 `GET /api/health` reports the provider, the active model and whether the key is
 configured; it never returns the key. A missing key returns `api_key_configured: false`
@@ -205,16 +228,21 @@ before/after panes, error codes, and "Use result as new input" for reprompting.
 
 ## Verification status
 
-The provider implementation is verified locally: Python modules compile, Node modules
+The provider implementations are verified locally: Python modules compile, Node modules
 parse, the image response parser and request payload are exercised with mocked Hack Club
-responses, the FastAPI health/validation endpoints pass, and the ideas parser is exercised
-with a mocked chat completion.
+responses, the FastAPI health/validation endpoints pass, and the Gemini ideas request
+payload and response normalization are exercised against a mocked `generateContent`
+response.
 
-Live checks with the Hack Club key from `gemini-ideas/.env` also passed: the ideas
-diagnostic returned a valid plan, and a live image request returned `200` with a JPEG in
-about 11 seconds. The image service reads the root `.env` (or its Render environment), so
-its `/api/health` reports `api_key_configured: false` until `HACKCLUB_AI_API_KEY` is added
-there. No Cloudflare credentials are required by the current code.
+A live image request with the Hack Club key returned `200` with a JPEG in about 11
+seconds. The image service reads the root `.env` (or its Render environment), so its
+`/api/health` reports `api_key_configured: false` until `HACKCLUB_AI_API_KEY` is added
+there.
+
+A live Gemini ideas request with the key in `gemini-ideas/.env` passed. The primary
+`gemini-3.8-flash` model was temporarily at capacity, so the service retried with
+`gemini-3.5-flash-lite` and returned a valid plan with prices and stores. No Cloudflare
+credentials are required by the current code.
 
 ## Files
 
@@ -222,7 +250,7 @@ there. No Cloudflare credentials are required by the current code.
 |---|---|
 | `hackclub_edit.py` | Hack Club AI request, prompt, validation/resizing, retry and image parsing |
 | `main.py` | FastAPI app: `POST /api/edit`, `GET /api/health`, JSON errors, CORS, `/test-ui` |
-| `gemini-ideas/lib/hackclub-ai.js` | Ideas prompt, JSON schema, Hack Club AI call and response normalization |
+| `gemini-ideas/lib/gemini-ai.js` | Ideas prompt, JSON schema, Gemini API call and response normalization |
 | `gemini-ideas/server.js` | Ideas HTTP server and temporary test UI |
 | `src/lib/renovo.functions.ts` | GUI server functions that call both backends |
 | `temp_test_ui/index.html` | Disposable manual image test harness |

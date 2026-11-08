@@ -107,12 +107,12 @@ if ($busy.Count -gt 0) {
 }
 
 $rootKey = Get-EnvValue (Join-Path $root '.env') 'HACKCLUB_AI_API_KEY'
-$ideasKey = Get-EnvValue (Join-Path $root 'gemini-ideas\.env') 'HACKCLUB_AI_API_KEY'
+$ideasKey = Get-EnvValue (Join-Path $root 'gemini-ideas\.env') 'GEMINI_API_KEY'
 if (-not $rootKey -or $rootKey -like '*your-api-key*') {
     Write-Host "WARNING: HACKCLUB_AI_API_KEY is missing from .env - image previews will fail." -ForegroundColor Yellow
 }
 if (-not $ideasKey -or $ideasKey -like '*your-api-key*') {
-    Write-Host "WARNING: HACKCLUB_AI_API_KEY is missing from gemini-ideas\.env - pricing will fail." -ForegroundColor Yellow
+    Write-Host "WARNING: GEMINI_API_KEY is missing from gemini-ideas\.env - pricing will fail." -ForegroundColor Yellow
 }
 
 # ---------------------------------------------------------------------------

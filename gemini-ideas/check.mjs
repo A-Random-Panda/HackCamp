@@ -1,16 +1,16 @@
 // One-command self-check: node check.mjs
-// Verifies HACKCLUB_AI_API_KEY is present, checks the configured model is in the
-// public Hack Club AI model list, and runs a real ideas request. Never prints the key.
+// Verifies GEMINI_API_KEY is present, checks the configured models are listed by
+// the Gemini API, and runs a real ideas request. Never prints the key.
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { loadEnvFile } from './lib/env.js';
 import {
   generateIdeas,
-  HackClubAIError,
+  GeminiAIError,
   getApiBase,
   getModelCandidates,
   getModelName,
-} from './lib/hackclub-ai.js';
+} from './lib/gemini-ai.js';
 
 const dir = fileURLToPath(new URL('.', import.meta.url));
 let failures = 0;
@@ -30,45 +30,53 @@ function info(message) {
 }
 
 const envFileLoaded = await loadEnvFile(dir);
-const apiKey = process.env.HACKCLUB_AI_API_KEY;
+const apiKey = process.env.GEMINI_API_KEY;
 
-console.log(`\nAI Renovator - Hack Club AI check (${getModelName()})\n`);
+console.log(`\nAI Renovator - Gemini API check (${getModelName()})\n`);
 info(`Working directory: ${dir}`);
 info(`.env file: ${envFileLoaded ? 'found' : 'not found'}`);
 info(`Credentials source: ${envFileLoaded ? '.env and/or environment' : 'environment only'}`);
 
 if (!apiKey) {
   fail(
-    'HACKCLUB_AI_API_KEY is not set.',
-    `Create a key at https://ai.hackclub.com/dashboard, add it to ${join(dir, '.env')} and run this again.`,
+    'GEMINI_API_KEY is not set.',
+    `Create a key at https://aistudio.google.com/apikey, add it to ${join(dir, '.env')} and run this again.`,
   );
   console.log('\nStopping here because nothing else can be checked without the API key.\n');
   process.exit(1);
 }
 
-pass(`HACKCLUB_AI_API_KEY is set (${apiKey.length} characters)`);
+pass(`GEMINI_API_KEY is set (${apiKey.length} characters)`);
 
-// Step 1: the model list is public, so verify the configured model IDs exist.
+// Step 1: verify the configured model IDs are available through the Gemini API.
 try {
-  const response = await fetch(`${getApiBase()}/models`, { signal: AbortSignal.timeout(20_000) });
+  const response = await fetch(`${getApiBase()}/models?pageSize=1000`, {
+    headers: { 'x-goog-api-key': apiKey },
+    signal: AbortSignal.timeout(20_000),
+  });
   const data = await response.json().catch(() => null);
 
   if (!response.ok) {
-    fail(`Could not list Hack Club AI models (HTTP ${response.status}).`);
+    fail(`Could not list Gemini API models (HTTP ${response.status}).`);
   } else {
-    const available = new Set((data?.data || []).map((model) => model.id));
+    const available = new Set(
+      (data?.models || []).map((model) => String(model?.name || '').replace(/^models\//, '')),
+    );
     const models = getModelCandidates();
 
     for (const model of models) {
       if (available.has(model)) {
         pass(`Model available: ${model}`);
       } else {
-        fail(`Model not listed by Hack Club AI: ${model}`, 'Set HACKCLUB_IDEAS_MODEL to a model from /proxy/v1/models.');
+        fail(
+          `Model not listed by Gemini API: ${model}`,
+          `Set GEMINI_TEXT_MODEL to a model from ${getApiBase()}/models.`,
+        );
       }
     }
   }
 } catch (error) {
-  fail('Could not reach the Hack Club AI model list.', error.message);
+  fail('Could not reach the Gemini API model list.', error.message);
 }
 
 // Step 2: a real generation through the app's own code path.
@@ -80,7 +88,7 @@ try {
     constraints: 'Renting, one weekend, no experience.',
   });
 
-  pass(`Hack Club AI returned a response the app could parse (answered by ${ideas.model})`);
+  pass(`Gemini API returned a response the app could parse (answered by ${ideas.model})`);
   info(`Summary: ${ideas.summary || '(empty)'}`);
   info(`Rough budget: ${ideas.budget || '(empty)'}`);
   info(`Tools/resources: ${ideas.toolsAndResources.length}`);
@@ -111,7 +119,7 @@ try {
   if (!ideas.stores.length) fail('No local stores were returned.', 'Check the stores field in the schema and prompt.');
   if (!ideas.budget) fail('No rough total budget was returned.', 'Check the budget field in the schema and prompt.');
 } catch (error) {
-  const message = error instanceof HackClubAIError ? error.message : String(error?.message || error);
+  const message = error instanceof GeminiAIError ? error.message : String(error?.message || error);
   fail('The ideas request failed.', message);
 }
 

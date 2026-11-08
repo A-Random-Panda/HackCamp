@@ -3,9 +3,9 @@
 # Deploy this file from the repo root in Render:
 #   New -> Blueprint -> connect this repo -> apply.
 #
-# The two backend services prompt for HACKCLUB_AI_API_KEY during the initial
-# Blueprint creation. Values are not stored in this file. The GUI receives the
-# public API URLs below.
+# The ideas service prompts for GEMINI_API_KEY and the image service prompts for
+# HACKCLUB_AI_API_KEY during the initial Blueprint creation. Values are not stored
+# in this file. The GUI receives the public API URLs below.
 #
 # The service names determine the onrender.com URLs. If you rename a service,
 # update the matching *_API_URL value on renovo-ai-web.
@@ -24,7 +24,7 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
-      - key: HACKCLUB_AI_API_KEY
+      - key: GEMINI_API_KEY
         sync: false
 
   # Python image-edit API (FastAPI + Pillow + Hack Club AI).

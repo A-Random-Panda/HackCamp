@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { generateIdeas, HackClubAIError, getModelCandidates, getModelName } from './lib/hackclub-ai.js';
+import { generateIdeas, GeminiAIError, getModelCandidates, getModelName } from './lib/gemini-ai.js';
 import { loadEnvFile } from './lib/env.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -36,7 +36,7 @@ async function readJsonBody(req, limitBytes = 64 * 1024) {
 
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > limitBytes) throw new HackClubAIError('Request body is too large.', 413);
+    if (size > limitBytes) throw new GeminiAIError('Request body is too large.', 413);
     chunks.push(chunk);
   }
 
@@ -45,7 +45,7 @@ async function readJsonBody(req, limitBytes = 64 * 1024) {
   try {
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   } catch {
-    throw new HackClubAIError('Request body must be valid JSON.', 400);
+    throw new GeminiAIError('Request body must be valid JSON.', 400);
   }
 }
 
@@ -53,11 +53,11 @@ function validateInput(body) {
   const description = typeof body.description === 'string' ? body.description.trim() : '';
 
   if (description.length < 10) {
-    throw new HackClubAIError('Please describe the renovation in at least 10 characters.', 400);
+    throw new GeminiAIError('Please describe the renovation in at least 10 characters.', 400);
   }
 
   if (description.length > 2000) {
-    throw new HackClubAIError('Please keep the description under 2000 characters.', 400);
+    throw new GeminiAIError('Please keep the description under 2000 characters.', 400);
   }
 
   const roomType = typeof body.roomType === 'string' ? body.roomType.trim().slice(0, 60) : '';
@@ -113,11 +113,11 @@ const server = createServer(async (req, res) => {
     }
 
     if (url.pathname === '/api/health') {
-      const apiKeyConfigured = Boolean(process.env.HACKCLUB_AI_API_KEY);
+      const apiKeyConfigured = Boolean(process.env.GEMINI_API_KEY);
 
       sendJson(res, 200, {
         ok: true,
-        provider: 'hackclub-ai',
+        provider: 'gemini',
         model: getModelName(),
         fallbackModels: getModelCandidates().slice(1),
         apiKeyConfigured,
@@ -132,8 +132,8 @@ const server = createServer(async (req, res) => {
 
     sendJson(res, 405, { error: 'Method not allowed.' });
   } catch (error) {
-    if (error instanceof HackClubAIError) {
-      if (error.status >= 500) console.error(`[hackclub-ai] ${error.status}: ${error.message}`);
+    if (error instanceof GeminiAIError) {
+      if (error.status >= 500) console.error(`[gemini-ai] ${error.status}: ${error.message}`);
       sendJson(res, error.status, { error: error.message });
       return;
     }
@@ -149,14 +149,14 @@ const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 
 server.listen(PORT, HOST, () => {
-  const hasKey = Boolean(process.env.HACKCLUB_AI_API_KEY);
+  const hasKey = Boolean(process.env.GEMINI_API_KEY);
   const keyState = hasKey
     ? 'configured'
-    : `MISSING - set HACKCLUB_AI_API_KEY in ${join(__dirname, '.env')}, then restart`;
+    : `MISSING - set GEMINI_API_KEY in ${join(__dirname, '.env')}, then restart`;
 
   console.log(`Renovation ideas test UI: http://localhost:${PORT}`);
   console.log(
-    `Provider: Hack Club AI | Model: ${getModelName()} (fallbacks: ${getModelCandidates()
+    `Provider: Google Gemini API | Model: ${getModelName()} (fallbacks: ${getModelCandidates()
       .slice(1)
       .join(', ')}) | Credentials: ${keyState}`,
   );

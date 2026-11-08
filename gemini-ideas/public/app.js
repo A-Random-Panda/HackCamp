@@ -65,7 +65,7 @@ function renderTools(tools) {
     toolsEl.append(item);
   }
 
-  if (!tools.length) toolsEl.append(el('li', 'why', 'Hack Club AI listed no tools for this job.'));
+  if (!tools.length) toolsEl.append(el('li', 'why', 'Gemini listed no tools for this job.'));
 }
 
 function renderStores(stores) {
@@ -98,7 +98,7 @@ function renderSteps(steps) {
     stepsEl.append(item);
   }
 
-  if (!steps.length) stepsEl.append(el('li', 'why', 'Hack Club AI listed no steps for this job.'));
+  if (!steps.length) stepsEl.append(el('li', 'why', 'Gemini listed no steps for this job.'));
 }
 
 function render(ideas) {
@@ -135,7 +135,7 @@ form.addEventListener('submit', async (event) => {
   submitButton.disabled = true;
   submitButton.textContent = 'Thinking...';
   clearResults();
-  setStatus('Asking Hack Club AI for tools, prices, shops and steps...');
+  setStatus('Asking Gemini for tools, prices, shops and steps...');
 
   try {
     const response = await fetch('/api/ideas', {
@@ -175,7 +175,7 @@ async function checkServerConfig() {
 
     if (!health.apiKeyConfigured) {
       serverNotice.textContent =
-        `This server is missing HACKCLUB_AI_API_KEY (model ${health.model}). Add it to gemini-ideas/.env ` +
+        `This server is missing GEMINI_API_KEY (model ${health.model}). Add it to gemini-ideas/.env ` +
         'and restart the server - the file must sit next to server.js, not in the repo root.';
       serverNotice.hidden = false;
     } else {

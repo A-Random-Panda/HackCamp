@@ -4,62 +4,63 @@ This service owns one part of Renovo: asking an AI model for the **tools and res
 a renovation needs with **rough prices**, **where to buy them locally**, and the
 **possible steps**. It also ships a deliberately simple test frontend.
 
-Generation runs on **[Hack Club AI](https://ai.hackclub.com)** using an
-OpenAI-compatible chat-completions endpoint.
+Generation runs on the **[Google Gemini API](https://ai.google.dev)** using the native
+`generateContent` endpoint, not an OpenAI-compatible proxy.
 
 ## Run it
 
 ```bash
 cd gemini-ideas
-cp .env.example .env          # then add HACKCLUB_AI_API_KEY
+cp .env.example .env          # then add GEMINI_API_KEY
 node server.js                # or: npm start
-node check.mjs                # optional: verify the key, model and a real request
+node check.mjs                # optional: verify the key, models and a real request
 ```
 
 Open <http://localhost:3000>. Port and model can be changed with `PORT` and
-`HACKCLUB_IDEAS_MODEL`.
+`GEMINI_TEXT_MODEL`.
 
-### Hack Club AI credentials
+### Gemini API credentials
 
-1. Create an API key at <https://ai.hackclub.com/dashboard>.
+1. Create an API key in [Google AI Studio](https://aistudio.google.com/apikey).
 2. Add it to `gemini-ideas/.env`:
 
 ```bash
-HACKCLUB_AI_API_KEY=...
+GEMINI_API_KEY=...
 ```
 
 Optional settings:
 
 ```bash
-HACKCLUB_AI_BASE_URL=https://ai.hackclub.com/proxy/v1
-HACKCLUB_IDEAS_MODEL=google/gemini-2.5-flash
+GEMINI_TEXT_MODEL=gemini-3.8-flash
+GEMINI_API_BASE_URL=https://generativelanguage.googleapis.com/v1beta
 ```
 
-The default model is `google/gemini-2.5-flash`; if it is unavailable, the service
-retries once with `qwen/qwen3-32b`. The server calls
-`POST {HACKCLUB_AI_BASE_URL}/chat/completions` with `Authorization: Bearer <key>` and
-asks the model for a single JSON object. Never commit `gemini-ideas/.env`; it is
-gitignored.
+The default model is `gemini-3.8-flash`; if it is unavailable, the service retries once
+with `gemini-3.5-flash-lite`. The server calls
+`POST {GEMINI_API_BASE_URL}/models/{model}:generateContent` with the `x-goog-api-key`
+header, sends the planner prompt as a system instruction, and requests a single JSON
+object with `responseMimeType: "application/json"` and a `responseSchema`. Never commit
+`gemini-ideas/.env`; it is gitignored.
 
 ## Troubleshooting
 
 `node check.mjs` reports:
 
 1. whether `.env` was found and the key is set (it never prints the key),
-2. whether the configured model IDs are in Hack Club AI's public model list,
+2. whether the configured model IDs are in Gemini's model list,
 3. a real `generateIdeas()` round trip and what came back.
 
 Common causes:
 
-- **"HACKCLUB_AI_API_KEY is not set"** — the `.env` file must sit next to `server.js`
+- **"GEMINI_API_KEY is not set"** — the `.env` file must sit next to `server.js`
   (`gemini-ideas/.env`), and the server must be restarted after editing it. The page
   shows a banner when the key is missing.
-- **HTTP 401 / 403** — the key is wrong or revoked. Create a new one from the Hack Club
-  AI dashboard.
-- **HTTP 404 / model not listed** — set `HACKCLUB_IDEAS_MODEL` to an ID from
-  `GET https://ai.hackclub.com/proxy/v1/models`.
-- **Invalid JSON** — the model did not follow the schema. The service retries with the
-  fallback model once. Re-run if it persists.
+- **HTTP 401 / 403** — the key is wrong, revoked or lacks access. Create a new one in
+  Google AI Studio.
+- **HTTP 404 / model not listed** — set `GEMINI_TEXT_MODEL` to a model from
+  `GET {GEMINI_API_BASE_URL}/models`.
+- **Invalid JSON or an empty response** — the service retries with the fallback model
+  once. Re-run if it persists.
 
 ## API
 
@@ -107,7 +108,7 @@ Response:
     }
   ],
   "tips": ["string"],
-  "model": "google/gemini-2.5-flash"
+  "model": "gemini-3.8-flash"
 }
 ```
 
@@ -116,14 +117,14 @@ that commonly serve that region, or store types when no specific shop is known; 
 and stock are never invented.
 
 `GET /api/health` reports the provider, the active model, fallback models and whether
-`HACKCLUB_AI_API_KEY` is configured:
+`GEMINI_API_KEY` is configured:
 
 ```json
 {
   "ok": true,
-  "provider": "hackclub-ai",
-  "model": "google/gemini-2.5-flash",
-  "fallbackModels": ["qwen/qwen3-32b"],
+  "provider": "gemini",
+  "model": "gemini-3.8-flash",
+  "fallbackModels": ["gemini-3.5-flash-lite"],
   "apiKeyConfigured": true
 }
 ```
@@ -131,12 +132,12 @@ and stock are never invented.
 ## Files
 
 - `server.js` — HTTP server, `POST /api/ideas`, `GET /api/health`, static `public/`
-- `lib/hackclub-ai.js` — prompt, JSON schema, Hack Club AI call, response normalization
+- `lib/gemini-ai.js` — prompt, JSON schema, Gemini API call, response normalization
 - `lib/env.js` — minimal `.env` loader (no dependency)
 - `check.mjs` — diagnostic script (`node check.mjs`)
 - `public/` — temporary test UI
 
 ## Integrating later
 
-The reusable part is `generateIdeas(input)` in `lib/hackclub-ai.js`; call it from the main
+The reusable part is `generateIdeas(input)` in `lib/gemini-ai.js`; call it from the main
 app's route and drop `public/`, `server.js` and `check.mjs`.
