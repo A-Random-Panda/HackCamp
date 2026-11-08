@@ -1,6 +1,6 @@
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
-const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 
 const SYSTEM_PROMPT = `You are a practical renovation planner.
 You are given a description of a space the user wants to renovate.
