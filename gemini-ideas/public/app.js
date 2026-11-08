@@ -65,7 +65,7 @@ function renderTools(tools) {
     toolsEl.append(item);
   }
 
-  if (!tools.length) toolsEl.append(el('li', 'why', 'Cloudflare AI listed no tools for this job.'));
+  if (!tools.length) toolsEl.append(el('li', 'why', 'Hack Club AI listed no tools for this job.'));
 }
 
 function renderStores(stores) {
@@ -98,7 +98,7 @@ function renderSteps(steps) {
     stepsEl.append(item);
   }
 
-  if (!steps.length) stepsEl.append(el('li', 'why', 'Cloudflare AI listed no steps for this job.'));
+  if (!steps.length) stepsEl.append(el('li', 'why', 'Hack Club AI listed no steps for this job.'));
 }
 
 function render(ideas) {
@@ -135,7 +135,7 @@ form.addEventListener('submit', async (event) => {
   submitButton.disabled = true;
   submitButton.textContent = 'Thinking...';
   clearResults();
-  setStatus('Asking Cloudflare Workers AI for tools, prices, shops and steps...');
+  setStatus('Asking Hack Club AI for tools, prices, shops and steps...');
 
   try {
     const response = await fetch('/api/ideas', {
@@ -174,13 +174,8 @@ async function checkServerConfig() {
     const health = await response.json();
 
     if (!health.apiKeyConfigured) {
-      const missing = [];
-      if (health.accountIdConfigured === false) missing.push('CLOUDFLARE_ACCOUNT_ID');
-      if (health.tokenConfigured === false) missing.push('CLOUDFLARE_API_TOKEN');
-      const what = missing.length ? missing.join(' and ') : 'Cloudflare AI credentials';
-
       serverNotice.textContent =
-        `This server is missing ${what} (model ${health.model}). Add it to gemini-ideas/.env ` +
+        `This server is missing HACKCLUB_AI_API_KEY (model ${health.model}). Add it to gemini-ideas/.env ` +
         'and restart the server - the file must sit next to server.js, not in the repo root.';
       serverNotice.hidden = false;
     } else {

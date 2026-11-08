@@ -1,71 +1,65 @@
-# Ideas branch (tools, prices, stores and steps)
+# Ideas service (tools, prices, stores and steps)
 
-The folder and branch name are historical: generation now runs on **Cloudflare Workers AI**,
-not Gemini.
+This service owns one part of Renovo: asking an AI model for the **tools and resources**
+a renovation needs with **rough prices**, **where to buy them locally**, and the
+**possible steps**. It also ships a deliberately simple test frontend.
 
-This branch owns one piece of AI Renovator: asking an AI model for the **tools and resources**
-a renovation needs with **rough prices**, **where to buy them locally**, and the **possible
-steps** to do it. It also ships a deliberately simple throwaway frontend so the endpoint can be
-tested on its own.
-
-Prices and store suggestions are rough planning estimates, not quotes or live local stock; the
-UI says so. It is self-contained: dependency-free Node, plain HTML/CSS/JS, no build step.
-Nothing here touches image generation or before/after comparison.
+Generation runs on **[Hack Club AI](https://ai.hackclub.com)** using an
+OpenAI-compatible chat-completions endpoint.
 
 ## Run it
 
 ```bash
 cd gemini-ideas
-cp .env.example .env          # then add your Cloudflare account ID and token
-npm start                     # or: node server.js
-npm run check                 # optional: verify credentials and a real request
+cp .env.example .env          # then add HACKCLUB_AI_API_KEY
+node server.js                # or: npm start
+node check.mjs                # optional: verify the key, model and a real request
 ```
 
-Open <http://localhost:3000>. Port and model can be changed with `PORT` and `CLOUDFLARE_AI_MODEL`.
+Open <http://localhost:3000>. Port and model can be changed with `PORT` and
+`HACKCLUB_IDEAS_MODEL`.
 
-### Cloudflare credentials
+### Hack Club AI credentials
 
-1. **Account ID** - Cloudflare dashboard -> Workers & Pages -> Account ID (right sidebar).
-2. **API token** - <https://dash.cloudflare.com/profile/api-tokens> -> Create Token. Use the
-   Workers AI template, or a custom token with **Workers AI: Read** for that account. Copy it
-   once; Cloudflare will not show it again.
-
-Both go in `gemini-ideas/.env`:
+1. Create an API key at <https://ai.hackclub.com/dashboard>.
+2. Add it to `gemini-ideas/.env`:
 
 ```bash
-CLOUDFLARE_ACCOUNT_ID=...
-CLOUDFLARE_API_TOKEN=...
+HACKCLUB_AI_API_KEY=...
 ```
 
-The server calls the Workers AI REST API at
-`POST /accounts/{account_id}/ai/run/{model}` with `Authorization: Bearer <token>` and asks for
-JSON Mode (`response_format` with a JSON Schema). Never commit `gemini-ideas/.env`; the repo's
-`.gitignore` already excludes it.
+Optional settings:
+
+```bash
+HACKCLUB_AI_BASE_URL=https://ai.hackclub.com/proxy/v1
+HACKCLUB_IDEAS_MODEL=google/gemini-2.5-flash
+```
+
+The default model is `google/gemini-2.5-flash`; if it is unavailable, the service
+retries once with `qwen/qwen3-32b`. The server calls
+`POST {HACKCLUB_AI_BASE_URL}/chat/completions` with `Authorization: Bearer <key>` and
+asks the model for a single JSON object. Never commit `gemini-ideas/.env`; it is
+gitignored.
 
 ## Troubleshooting
 
-`npm run check` is the fastest way to find the problem. It reports:
+`node check.mjs` reports:
 
-1. whether `.env` was found and both credentials are set (it never prints the token),
-2. whether Cloudflare accepts the token, and whether Workers AI is reachable for that account,
-3. a real `generateIdeas()` round trip and what came back, including that prices, a budget and
-   local stores are present.
+1. whether `.env` was found and the key is set (it never prints the key),
+2. whether the configured model IDs are in Hack Club AI's public model list,
+3. a real `generateIdeas()` round trip and what came back.
 
 Common causes:
 
-- **"CLOUDFLARE_ACCOUNT_ID is not set"** - the `.env` file must sit next to `server.js`
-  (`gemini-ideas/.env`), not in the repo root, and the server must be restarted after editing
-  it. The page shows a banner when credentials are missing.
-- **`Authentication error` / HTTP 403** - the token lacks Workers AI permission for that
-  account, or the account ID belongs to a different account. Create a token from the Workers AI
-  template and recheck the ID.
-- **`model ... not found`** - that model is not available to your account. Set
-  `CLOUDFLARE_AI_MODEL=@cf/...` in `.env`; the model catalog is at
-  <https://developers.cloudflare.com/workers-ai/models/>.
-- **`JSON Mode couldn't be met`** - the model could not satisfy the schema on that attempt.
-  Re-run; the app also retries on the fallback model.
-- **A cloud preview still shows the missing-credentials banner** - the preview runs on the
-  workspace machine, so the credentials must be set there too, not only on your laptop.
+- **"HACKCLUB_AI_API_KEY is not set"** — the `.env` file must sit next to `server.js`
+  (`gemini-ideas/.env`), and the server must be restarted after editing it. The page
+  shows a banner when the key is missing.
+- **HTTP 401 / 403** — the key is wrong or revoked. Create a new one from the Hack Club
+  AI dashboard.
+- **HTTP 404 / model not listed** — set `HACKCLUB_IDEAS_MODEL` to an ID from
+  `GET https://ai.hackclub.com/proxy/v1/models`.
+- **Invalid JSON** — the model did not follow the schema. The service retries with the
+  fallback model once. Re-run if it persists.
 
 ## API
 
@@ -81,7 +75,7 @@ Common causes:
 ```
 
 `description` (10-2000 chars) is required; `roomType`, `location` and `constraints` are
-optional. `location` picks the currency and the store suggestions, so plans without it fall
+optional. `location` picks the currency and store suggestions, so plans without it fall
 back to USD and generic store types.
 
 Response:
@@ -104,35 +98,45 @@ Response:
     { "name": "Screwfix", "type": "big-box hardware", "bestFor": "tiling tools and safety gear" }
   ],
   "steps": [
-    { "order": 1, "title": "string", "detail": "string", "estimatedTime": "half a day", "needs": ["tile breaker"] }
+    {
+      "order": 1,
+      "title": "string",
+      "detail": "string",
+      "estimatedTime": "half a day",
+      "needs": ["tile breaker"]
+    }
   ],
   "tips": ["string"],
-  "model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+  "model": "google/gemini-2.5-flash"
 }
 ```
 
-Prices are rough strings from the model in the local currency, not calculated totals. Store
-names are chains that commonly serve that region, or store types when no specific shop is
-known; addresses and stock are never invented.
+Prices are rough strings from the model, not calculated totals. Store names are chains
+that commonly serve that region, or store types when no specific shop is known; addresses
+and stock are never invented.
 
-`GET /api/health` reports the model, its fallbacks, and whether the account ID and token are
-present.
+`GET /api/health` reports the provider, the active model, fallback models and whether
+`HACKCLUB_AI_API_KEY` is configured:
 
-The response's `model` field reports which model actually answered. If the primary model
-(`CLOUDFLARE_AI_MODEL`, default `@cf/meta/llama-3.3-70b-instruct-fp8-fast`) is unavailable
-(404/429/5xx, timeout or a JSON Mode failure), the app retries with
-`@cf/meta/llama-3.1-8b-instruct-fast`.
+```json
+{
+  "ok": true,
+  "provider": "hackclub-ai",
+  "model": "google/gemini-2.5-flash",
+  "fallbackModels": ["qwen/qwen3-32b"],
+  "apiKeyConfigured": true
+}
+```
 
 ## Files
 
-- `server.js` - HTTP server, `POST /api/ideas`, `GET /api/health`, static `public/`
-- `lib/cloudflare-ai.js` - prompt, JSON Schema, Workers AI call, response normalisation
-- `lib/env.js` - minimal `.env` loader (no dependency)
-- `check.mjs` - diagnostic script (`npm run check`)
-- `public/` - the temporary test UI
+- `server.js` — HTTP server, `POST /api/ideas`, `GET /api/health`, static `public/`
+- `lib/hackclub-ai.js` — prompt, JSON schema, Hack Club AI call, response normalization
+- `lib/env.js` — minimal `.env` loader (no dependency)
+- `check.mjs` — diagnostic script (`node check.mjs`)
+- `public/` — temporary test UI
 
 ## Integrating later
 
-The frontend is temporary. The reusable part is `generateIdeas(input)` in
-`lib/cloudflare-ai.js`; call it from the main app's route and drop `public/`, `server.js` and
-`check.mjs`.
+The reusable part is `generateIdeas(input)` in `lib/hackclub-ai.js`; call it from the main
+app's route and drop `public/`, `server.js` and `check.mjs`.

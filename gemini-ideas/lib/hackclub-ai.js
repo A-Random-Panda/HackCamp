@@ -1,20 +1,24 @@
-const API_BASE = 'https://api.cloudflare.com/client/v4/accounts';
+const DEFAULT_API_BASE = 'https://ai.hackclub.com/proxy/v1';
 
-const PRIMARY_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
-const FALLBACK_MODELS = ['@cf/meta/llama-3.1-8b-instruct-fast'];
+const PRIMARY_MODEL = 'google/gemini-2.5-flash';
+const FALLBACK_MODELS = ['qwen/qwen3-32b'];
 const RETRYABLE_STATUSES = new Set([404, 429, 500, 502, 503, 504]);
 
 // Read env lazily: the server loads .env after this module is imported.
-function primaryModel() {
-  return process.env.CLOUDFLARE_AI_MODEL || PRIMARY_MODEL;
+export function getApiBase() {
+  return (process.env.HACKCLUB_AI_BASE_URL || DEFAULT_API_BASE).replace(/\/+$/, '');
+}
+
+function apiKey() {
+  return process.env.HACKCLUB_AI_API_KEY || '';
 }
 
 export function getModelName() {
-  return primaryModel();
+  return process.env.HACKCLUB_IDEAS_MODEL || PRIMARY_MODEL;
 }
 
 export function getModelCandidates() {
-  return [...new Set([primaryModel(), ...FALLBACK_MODELS])];
+  return [...new Set([getModelName(), ...FALLBACK_MODELS])];
 }
 
 const SYSTEM_PROMPT = `You are a practical renovation planner.
@@ -37,7 +41,7 @@ Rules:
 - Each step should say what "done" looks like in one or two sentences, and which tools it needs.
 - estimatedTime is a rough human effort such as "half a day" or "2-3 hours"; if unsure use a range.
 - Be concise and concrete. No filler, no marketing language.
-- Reply with JSON that matches the response schema.`;
+- Return only one valid JSON object that matches the response schema. Do not wrap it in markdown or add commentary.`;
 
 const RESPONSE_SCHEMA = {
   type: 'object',
@@ -132,10 +136,10 @@ const RESPONSE_SCHEMA = {
   required: ['summary', 'budget', 'toolsAndResources', 'stores', 'steps'],
 };
 
-export class CloudflareAIError extends Error {
+export class HackClubAIError extends Error {
   constructor(message, status = 502) {
     super(message);
-    this.name = 'CloudflareAIError';
+    this.name = 'HackClubAIError';
     this.status = status;
   }
 }
@@ -159,23 +163,37 @@ function buildPrompt({ description, roomType, constraints, location }) {
   return lines.join('\n');
 }
 
+function systemPrompt() {
+  return `${SYSTEM_PROMPT}\n\nResponse schema (JSON Schema):\n${JSON.stringify(RESPONSE_SCHEMA)}`;
+}
+
+function jsonObjectText(raw) {
+  let text = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/, '').trim();
+  if (text.startsWith('{')) return text;
+
+  // Accept a short preamble or trailing note around the JSON object.
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start !== -1 && end > start) return text.slice(start, end + 1);
+  return text;
+}
+
 function parseJson(raw, model) {
   if (raw && typeof raw === 'object') {
     return normalizeIdeas(raw, model);
   }
 
   if (typeof raw !== 'string' || !raw.trim()) {
-    throw new CloudflareAIError('Cloudflare AI returned an empty response.');
+    throw new HackClubAIError('Hack Club AI returned an empty response.');
   }
 
-  // The API is asked for JSON, but strip a stray code fence if the model adds one.
-  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/, '').trim();
+  const cleaned = jsonObjectText(raw);
 
   let parsed;
   try {
     parsed = JSON.parse(cleaned);
   } catch {
-    throw new CloudflareAIError('Cloudflare AI returned a response that was not valid JSON.');
+    throw new HackClubAIError('Hack Club AI returned a response that was not valid JSON.');
   }
 
   return normalizeIdeas(parsed, model);
@@ -228,7 +246,7 @@ function normalizeIdeas(raw, model) {
     : [];
 
   if (!summary && !toolsAndResources.length && !steps.length) {
-    throw new CloudflareAIError('Cloudflare AI returned no usable renovation ideas.');
+    throw new HackClubAIError('Hack Club AI returned no usable renovation ideas.');
   }
 
   const tips = Array.isArray(raw.tips)
@@ -238,8 +256,25 @@ function normalizeIdeas(raw, model) {
   return { summary, budget, toolsAndResources, stores, steps, tips, model };
 }
 
-async function requestModel(model, input, accountId, apiToken) {
-  const url = `${API_BASE}/${accountId}/ai/run/${model}`;
+function errorDetail(data) {
+  const error = data && data.error;
+  if (typeof error === 'string') return error;
+  if (error && typeof error === 'object') return error.message || error.code || JSON.stringify(error);
+  return (data && data.message) || '';
+}
+
+function contentText(message) {
+  if (typeof message?.content === 'string') return message.content;
+  if (Array.isArray(message?.content)) {
+    return message.content
+      .map((part) => (typeof part === 'string' ? part : part?.text || ''))
+      .join('');
+  }
+  return '';
+}
+
+async function requestModel(model, input) {
+  const url = `${getApiBase()}/chat/completions`;
 
   let response;
   try {
@@ -247,23 +282,24 @@ async function requestModel(model, input, accountId, apiToken) {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${apiToken}`,
+        authorization: `Bearer ${apiKey()}`,
       },
       body: JSON.stringify({
+        model,
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: systemPrompt() },
           { role: 'user', content: buildPrompt(input) },
         ],
-        response_format: { type: 'json_schema', json_schema: RESPONSE_SCHEMA },
-        max_tokens: 4096,
-        temperature: 0.7,
+        max_tokens: 8192,
+        temperature: 0.2,
+        stream: false,
       }),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(90_000),
     });
   } catch (error) {
     const reason =
-      error?.name === 'TimeoutError' ? 'Cloudflare AI took too long to respond.' : 'Could not reach Cloudflare AI.';
-    throw new CloudflareAIError(reason);
+      error?.name === 'TimeoutError' ? 'Hack Club AI took too long to respond.' : 'Could not reach Hack Club AI.';
+    throw new HackClubAIError(reason);
   }
 
   let data = null;
@@ -273,34 +309,23 @@ async function requestModel(model, input, accountId, apiToken) {
     data = null;
   }
 
-  if (!response.ok || data?.success === false) {
-    const detail =
-      (data?.errors || [])
-        .map((entry) => entry?.message)
-        .filter(Boolean)
-        .join('; ') || `HTTP ${response.status}`;
-    throw new CloudflareAIError(`Cloudflare AI error (${response.status}): ${detail}`, response.status);
+  if (!response.ok || data?.error) {
+    const detail = errorDetail(data) || `HTTP ${response.status}`;
+    throw new HackClubAIError(`Hack Club AI error (${response.status}): ${detail}`, response.status);
   }
 
-  const result = data?.result ?? data;
-  const raw = result?.response ?? result;
-  return parseJson(raw, model);
+  const content = contentText(data?.choices?.[0]?.message);
+  if (!content.trim()) {
+    throw new HackClubAIError('Hack Club AI returned an empty response.');
+  }
+
+  return parseJson(content, model);
 }
 
 export async function generateIdeas(input) {
-  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-
-  if (!accountId) {
-    throw new CloudflareAIError(
-      'CLOUDFLARE_ACCOUNT_ID is not set on this server. Add it to gemini-ideas/.env next to server.js and restart the server, then check /api/health.',
-      500,
-    );
-  }
-
-  if (!apiToken) {
-    throw new CloudflareAIError(
-      'CLOUDFLARE_API_TOKEN is not set on this server. Add it to gemini-ideas/.env next to server.js and restart the server, then check /api/health.',
+  if (!apiKey()) {
+    throw new HackClubAIError(
+      'HACKCLUB_AI_API_KEY is not set on this server. Add it to gemini-ideas/.env next to server.js and restart the server, then check /api/health.',
       500,
     );
   }
@@ -311,19 +336,19 @@ export async function generateIdeas(input) {
     const model = models[index];
 
     try {
-      return await requestModel(model, input, accountId, apiToken);
+      return await requestModel(model, input);
     } catch (error) {
       const nextModel = models[index + 1];
       const retryable =
-        error instanceof CloudflareAIError &&
-        (RETRYABLE_STATUSES.has(error.status) || /JSON Mode/i.test(error.message));
+        error instanceof HackClubAIError &&
+        (RETRYABLE_STATUSES.has(error.status) || /JSON|no usable|empty response/i.test(error.message));
 
       if (!retryable || !nextModel) throw error;
 
-      console.warn(`[cloudflare-ai] ${model} unusable (${error.message}); retrying with ${nextModel}`);
+      console.warn(`[hackclub-ai] ${model} unusable (${error.message}); retrying with ${nextModel}`);
     }
   }
 
   // The loop always returns or throws.
-  throw new CloudflareAIError('Cloudflare AI could not answer with any configured model.');
+  throw new HackClubAIError('Hack Club AI could not answer with any configured model.');
 }

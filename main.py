@@ -22,7 +22,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load .env before anything reads the Cloudflare credentials.
+# Load .env before anything reads the Hack Club API key.
 load_dotenv()
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
@@ -30,12 +30,12 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
-from cloudflare_edit import (
+from hackclub_edit import (
     MAX_UPLOAD_BYTES,
-    MODEL,
     PROVIDER,
     ImageEditError,
     edit_room_image,
+    get_model_name,
     is_configured,
 )
 
@@ -97,7 +97,7 @@ async def health():
     return {
         "ok": True,
         "provider": PROVIDER,
-        "model": MODEL,
+        "model": get_model_name(),
         "api_key_configured": is_configured(),
     }
 
@@ -119,7 +119,7 @@ async def edit(
     Success (200):
       { "ok": true, "image_base64": "...", "image_mime_type": "image/png",
         "message": "model's short description, may be empty",
-        "model": "@cf/black-forest-labs/flux-2-klein-4b", "latency_ms": 12345 }
+        "model": "google/gemini-nano-banana-2.1", "latency_ms": 12345 }
 
     Failure: { "ok": false, "error": { "code": "...", "message": "..." } }
     """
@@ -136,7 +136,7 @@ async def edit(
             413,
         )
 
-    # The Cloudflare call is blocking network I/O, so keep it off the event loop.
+    # The Hack Club AI call is blocking network I/O, so keep it off the event loop.
     result = await run_in_threadpool(
         edit_room_image, raw, change_request, restrictions, image.content_type
     )
@@ -146,7 +146,7 @@ async def edit(
         "image_base64": base64.b64encode(result["image_bytes"]).decode("ascii"),
         "image_mime_type": result["mime_type"],
         "message": result["message"],
-        "model": MODEL,
+        "model": get_model_name(),
         "latency_ms": result["latency_ms"],
     }
 
