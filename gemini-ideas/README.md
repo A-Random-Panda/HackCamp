@@ -72,7 +72,12 @@ Response:
 }
 ```
 
-`GET /api/health` reports the configured model and whether `GEMINI_API_KEY` is present.
+`GET /api/health` reports the configured model, its fallbacks and whether `GEMINI_API_KEY` is present.
+
+The response's `model` field reports which model actually answered. If the primary model
+(`GEMINI_MODEL`, default `gemini-3.8-flash`) is overloaded or unavailable (404/429/5xx or a
+timeout), the app retries automatically with `gemini-3.6-flash` and then
+`gemini-3.5-flash-lite`, in that order.
 
 ## Files
 

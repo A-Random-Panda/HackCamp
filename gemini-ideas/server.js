@@ -2,13 +2,12 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { generateIdeas, GeminiError, MODEL_NAME } from './lib/gemini.js';
+import { generateIdeas, GeminiError, getModelCandidates, getModelName } from './lib/gemini.js';
 import { loadEnvFile } from './lib/env.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PUBLIC_DIR = join(__dirname, 'public');
-const PORT = Number(process.env.PORT) || 3000;
-const HOST = process.env.HOST || '0.0.0.0';
+
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -115,7 +114,8 @@ const server = createServer(async (req, res) => {
     if (url.pathname === '/api/health') {
       sendJson(res, 200, {
         ok: true,
-        model: MODEL_NAME,
+        model: getModelName(),
+        fallbackModels: getModelCandidates().slice(1),
         apiKeyConfigured: Boolean(process.env.GEMINI_API_KEY),
       });
       return;
@@ -141,10 +141,13 @@ const server = createServer(async (req, res) => {
 
 await loadEnvFile(__dirname);
 
+const PORT = Number(process.env.PORT) || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
+
 server.listen(PORT, HOST, () => {
   const keyState = process.env.GEMINI_API_KEY
     ? 'configured'
     : `MISSING - create ${join(__dirname, '.env')} with GEMINI_API_KEY=your-key, then restart`;
   console.log(`Renovation ideas test UI: http://localhost:${PORT}`);
-  console.log(`Model: ${MODEL_NAME} | API key: ${keyState}`);
+  console.log(`Model: ${getModelName()} (fallbacks: ${getModelCandidates().slice(1).join(', ')}) | API key: ${keyState}`);
 });

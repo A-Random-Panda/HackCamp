@@ -1,6 +1,21 @@
 const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
-const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+const PRIMARY_MODEL = 'gemini-3.8-flash';
+const FALLBACK_MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash-lite'];
+const RETRYABLE_STATUSES = new Set([404, 429, 500, 502, 503, 504]);
+
+// Read env lazily: the server loads .env after this module is imported.
+function primaryModel() {
+  return process.env.GEMINI_MODEL || PRIMARY_MODEL;
+}
+
+export function getModelName() {
+  return primaryModel();
+}
+
+export function getModelCandidates() {
+  return [...new Set([primaryModel(), ...FALLBACK_MODELS])];
+}
 
 const SYSTEM_PROMPT = `You are a practical renovation planner.
 You are given a description of a space the user wants to renovate.
@@ -101,7 +116,7 @@ function buildPrompt({ description, roomType, constraints }) {
   return lines.join('\n');
 }
 
-function parseJson(text) {
+function parseJson(text, model) {
   if (!text) {
     throw new GeminiError('Gemini returned an empty response.');
   }
@@ -116,10 +131,10 @@ function parseJson(text) {
     throw new GeminiError('Gemini returned a response that was not valid JSON.');
   }
 
-  return normalizeIdeas(parsed);
+  return normalizeIdeas(parsed, model);
 }
 
-function normalizeIdeas(raw) {
+function normalizeIdeas(raw, model) {
   const summary = typeof raw.summary === 'string' ? raw.summary.trim() : '';
 
   const toolsAndResources = Array.isArray(raw.toolsAndResources)
@@ -157,20 +172,11 @@ function normalizeIdeas(raw) {
     ? raw.tips.filter((tip) => typeof tip === 'string' && tip.trim()).map((tip) => tip.trim())
     : [];
 
-  return { summary, toolsAndResources, steps, tips, model: DEFAULT_MODEL };
+  return { summary, toolsAndResources, steps, tips, model };
 }
 
-export async function generateIdeas(input) {
-  const apiKey = process.env.GEMINI_API_KEY;
-
-  if (!apiKey) {
-    throw new GeminiError(
-      'GEMINI_API_KEY is not set on this server. Add it to gemini-ideas/.env next to server.js and restart the server, then check /api/health.',
-      500,
-    );
-  }
-
-  const url = `${API_BASE}/${encodeURIComponent(DEFAULT_MODEL)}:generateContent`;
+async function requestModel(model, input, apiKey) {
+  const url = `${API_BASE}/${encodeURIComponent(model)}:generateContent`;
 
   let response;
   try {
@@ -204,21 +210,53 @@ export async function generateIdeas(input) {
     } catch {
       // keep the raw text
     }
-    throw new GeminiError(`Gemini API error (${response.status}): ${detail || 'no details returned'}`);
+    throw new GeminiError(
+      `Gemini API error (${response.status}): ${detail || 'no details returned'}`,
+      response.status,
+    );
   }
 
   const data = await response.json();
   const candidate = data?.candidates?.[0];
 
   if (!candidate || candidate.finishReason === 'SAFETY' || candidate.finishReason === 'PROHIBITED_CONTENT') {
-    throw new GeminiError('Gemini declined to answer this request.');
+    throw new GeminiError('Gemini declined to answer this request.', 422);
   }
 
   const text = (candidate.content?.parts || [])
     .map((part) => (typeof part.text === 'string' ? part.text : ''))
     .join('');
 
-  return parseJson(text);
+  return parseJson(text, model);
 }
 
-export const MODEL_NAME = DEFAULT_MODEL;
+export async function generateIdeas(input) {
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
+    throw new GeminiError(
+      'GEMINI_API_KEY is not set on this server. Add it to gemini-ideas/.env next to server.js and restart the server, then check /api/health.',
+      500,
+    );
+  }
+
+  const models = getModelCandidates();
+
+  for (let index = 0; index < models.length; index += 1) {
+    const model = models[index];
+
+    try {
+      return await requestModel(model, input, apiKey);
+    } catch (error) {
+      const nextModel = models[index + 1];
+      const retryable = error instanceof GeminiError && RETRYABLE_STATUSES.has(error.status);
+
+      if (!retryable || !nextModel) throw error;
+
+      console.warn(`[gemini] ${model} unavailable (${error.message}); retrying with ${nextModel}`);
+    }
+  }
+
+  // The loop always returns or throws.
+  throw new GeminiError('Gemini could not answer with any configured model.');
+}
