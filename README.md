@@ -1,4 +1,4 @@
-# AI Renovator — image edit endpoint
+# Renovo
 
 A single, self-contained backend feature for **AI Renovator**: the user uploads a photo of a
 room, describes what they want changed, and gets back an edited photo of *the same room*.
