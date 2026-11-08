@@ -30,3 +30,9 @@ _test_output/
 # OS noise
 .DS_Store
 Thumbs.db
+
+# Project-local Bun toolchain (used to verify the Render build)
+.bun/
+
+# Build output
+.output/
