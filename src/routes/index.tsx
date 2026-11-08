@@ -200,11 +200,71 @@ function NewForm({ onCreated }: { onCreated: (p: Project) => void }) {
 function ProjectView({ project, onUpdate }: { project: Project; onUpdate: (fn: (p: Project) => Project) => void }) {
   const planFn = useServerFn(createPlan);
   const renderFn = useServerFn(renderFinished);
-  const [busy, setBusy] = useState<"plan" | "render" | null>(null);
+  const [busy, setBusy] = useState<"preview" | "plan" | "render" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState("");
   const [showChange, setShowChange] = useState(false);
+  const [refine, setRefine] = useState("");
+  const [showRefine, setShowRefine] = useState(false);
   const started = useRef(false);
+
+  // No plan yet: the edited room is waiting for a yes/no from the user.
+  const awaitingApproval = project.iterations.length === 0;
+
+  const previewPrompt = (instruction?: string) =>
+    [
+      `Renovate this room: ${project.renovation}.`,
+      instruction?.trim() ? `Refine the previous result: ${instruction.trim()}.` : "",
+      "Keep the same camera angle, layout and room geometry; photorealistic interior.",
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .slice(0, 4000);
+
+  // Step 1: show the edited room before spending anything on pricing.
+  const renderPreview = async (instruction?: string) => {
+    setError(null);
+    setBusy("preview");
+    try {
+      const { image } = await renderFn({
+        data: { image: project.preview ?? project.image, prompt: previewPrompt(instruction) },
+      });
+      onUpdate((p) => ({ ...p, preview: image }));
+      setShowRefine(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Step 2: the user approved the image, so now price the materials and write the steps.
+  const approvePreview = async () => {
+    if (!project.preview) return;
+    setError(null);
+    setBusy("plan");
+    try {
+      const plan = await planFn({
+        data: {
+          image: project.image,
+          renovation: project.renovation,
+          location: project.location,
+          constraints: project.constraints,
+          budget: project.budget,
+          history: [],
+        },
+      });
+      onUpdate((p) => ({
+        ...p,
+        name: plan.title || p.name,
+        iterations: [...p.iterations, p.preview ? { plan, render: p.preview } : { plan }],
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong.");
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const run = async (extraFeedback?: string) => {
     setError(null);
@@ -219,7 +279,7 @@ function ProjectView({ project, onUpdate }: { project: Project; onUpdate: (fn: (
       const idx = project.iterations.length;
       onUpdate((p) => ({ ...p, name: plan.title || p.name, iterations: [...p.iterations, { plan }] }));
       setBusy("render");
-      const { image } = await renderFn({ data: { image: project.image, prompt: plan.renderPrompt } });
+      const { image } = await renderFn({ data: { image: project.preview ?? project.image, prompt: plan.renderPrompt } });
       onUpdate((p) => ({ ...p, iterations: p.iterations.map((it, i) => (i === idx ? { ...it, render: image } : it)) }));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");
@@ -229,7 +289,7 @@ function ProjectView({ project, onUpdate }: { project: Project; onUpdate: (fn: (
   };
 
   useEffect(() => {
-    if (!started.current && project.iterations.length === 0) {
+    if (!started.current && project.iterations.length === 0 && !project.preview) {
       started.current = true;
       run();
     }
@@ -250,20 +310,65 @@ function ProjectView({ project, onUpdate }: { project: Project; onUpdate: (fn: (
         </div>
       </header>
 
-      {project.iterations.map((it, i) => (
-        <IterationView key={i} it={it} index={i} total={project.iterations.length} original={project.image} />
-      ))}
+      {awaitingApproval ? (
+        <section className="glass glow space-y-5 rounded-3xl p-6 fade-up">
+          <div>
+            <h2 className="font-display text-2xl font-bold text-brand">Your renovated space</h2>
+            <p className="text-sm text-muted-foreground">
+              Check the preview first. Once you're happy with it, Renovo prices the materials, finds stores and writes the steps.
+            </p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <figure className="overflow-hidden rounded-2xl bg-muted">
+              <img src={project.image} alt="Before" className="aspect-square w-full object-cover" />
+              <figcaption className="px-4 py-2 text-xs text-muted-foreground">Your photo</figcaption>
+            </figure>
+            <figure className="overflow-hidden rounded-2xl bg-muted">
+              {project.preview ? (
+                <img src={project.preview} alt="After" className="aspect-square w-full object-cover" />
+              ) : (
+                <div className="grid aspect-square place-items-center text-sm text-muted-foreground">
+                  <Loader2 className="h-6 w-6 animate-spin text-brand" />
+                </div>
+              )}
+              <figcaption className="px-4 py-2 text-xs text-muted-foreground">Proposed renovation</figcaption>
+            </figure>
+          </div>
+          {project.preview && !busy && (showRefine ? (
+            <div className="space-y-3">
+              <p className="font-display text-lg font-bold text-brand">What should change in the image?</p>
+              <textarea value={refine} onChange={(e) => setRefine(e.target.value)} rows={3} placeholder="e.g. keep the cabinets, but swap the floor for lighter oak and drop the rug" className="w-full resize-none rounded-xl bg-muted px-4 py-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+              <div className="flex gap-2">
+                <button disabled={!refine.trim()} onClick={() => { const f = refine; setRefine(""); renderPreview(f); }} className="flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm text-primary-foreground disabled:opacity-40"><RefreshCw className="h-4 w-4" /> Update preview</button>
+                <button onClick={() => setShowRefine(false)} className="rounded-full px-4 py-2 text-sm hover:bg-accent">Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="font-display text-lg font-bold">Happy with this preview?</p>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={approvePreview} className="flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm text-primary-foreground"><Check className="h-4 w-4" /> Yes, price this</button>
+                <button onClick={() => setShowRefine(true)} className="flex items-center gap-2 rounded-full bg-secondary px-5 py-2 text-sm"><RefreshCw className="h-4 w-4" /> Refine the image</button>
+              </div>
+            </div>
+          ))}
+        </section>
+      ) : (
+        project.iterations.map((it, i) => (
+          <IterationView key={i} it={it} index={i} total={project.iterations.length} original={project.image} />
+        ))
+      )}
 
       {busy && (
         <div className="glass flex items-center gap-3 rounded-2xl p-5 text-sm">
           <Loader2 className="h-5 w-5 animate-spin text-brand" />
-          {busy === "plan" ? "Renovo is pricing materials, finding stores and writing your steps…" : "Rendering your finished renovation…"}
+          {busy === "preview" ? "Rendering your renovated room…" : busy === "plan" ? "Renovo is pricing materials, finding stores and writing your steps…" : "Rendering your finished renovation…"}
         </div>
       )}
       {error && (
         <div className="glass flex items-center justify-between rounded-2xl border-destructive p-5 text-sm">
           <span>{error}</span>
-          <button onClick={() => (project.iterations.length && !project.iterations.at(-1)!.render ? renderAgain() : run())} className="rounded-full bg-brand px-4 py-1.5 text-primary-foreground">Try again</button>
+          <button onClick={() => (awaitingApproval ? (project.preview ? approvePreview() : renderPreview()) : project.iterations.length && !project.iterations.at(-1)!.render ? renderAgain() : run())} className="rounded-full bg-brand px-4 py-1.5 text-primary-foreground">Try again</button>
         </div>
       )}
 
@@ -285,7 +390,7 @@ function ProjectView({ project, onUpdate }: { project: Project; onUpdate: (fn: (
             </div>
           ) : (
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="font-display text-lg font-bold">Happy with the result?</p>
+              <p className="font-display text-lg font-bold">Happy with the plan?</p>
               <div className="flex gap-2">
                 <button onClick={() => onUpdate((p) => ({ ...p, accepted: true }))} className="flex items-center gap-2 rounded-full bg-brand px-5 py-2 text-sm text-primary-foreground"><Check className="h-4 w-4" /> Go with this</button>
                 <button onClick={() => setShowChange(true)} className="flex items-center gap-2 rounded-full bg-secondary px-5 py-2 text-sm"><RefreshCw className="h-4 w-4" /> Change it</button>
@@ -302,7 +407,7 @@ function ProjectView({ project, onUpdate }: { project: Project; onUpdate: (fn: (
     setError(null);
     setBusy("render");
     try {
-      const { image } = await renderFn({ data: { image: project.image, prompt: project.iterations[idx]?.plan.renderPrompt ?? "" } });
+      const { image } = await renderFn({ data: { image: project.preview ?? project.image, prompt: project.iterations[idx]?.plan.renderPrompt ?? "" } });
       onUpdate((p) => ({ ...p, iterations: p.iterations.map((it, i) => (i === idx ? { ...it, render: image } : it)) }));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong.");

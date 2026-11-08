@@ -24,5 +24,7 @@ export type Project = {
   constraints: string;
   budget: string;
   iterations: Iteration[];
+  /** Edited room shown for approval before any pricing work starts. */
+  preview?: string;
   accepted?: boolean;
 };
